@@ -727,11 +727,121 @@ public static void main(String[] args) {
 
 * 虚拟机常见的实现方式有两种：Stack based 和 Register based
 
+* 举例 c = a + b
+* 基于 HotSpot JVM 的源码和字节码如下
 
+```java
+void bar(int a, int b) {
+    int c =  a + b;
+}
+
+对应字节码
+0: iload_1 // 将 a 压入操作数栈
+1: iload_2 // 将 b 压入操作数栈
+2: iadd    // 将栈顶两个值出栈，相加，然后将结果放回栈顶
+3: istore_3 // 将栈顶值存入局部变量表中第 3 个 slot 中
+```
+
+* 基于寄存器的 LuaVM  的 lua袁爱民和字节码如下，查看字节码使用 luac -l -l -v -s test.lua 命令
+
+```
+local function my_add(a, b)
+	return a + b;
+end
+
+对应字节码
+1	[3]	ADD      	2 0 1
+```
+
+* 基于寄存器的 add 指令直接把期存器 R0 和 R1 相加，结果保存在寄存器 R2 中
+* 基于栈和基于寄存器的过程对比如下
+
+![stack.png](https://user-gold-cdn.xitu.io/2020/7/21/1736ededc2bf2ec5?w=794&h=440&f=png&s=100717)
+
+* 基于栈的指令集一致性更好，代码更加紧凑、编译器更加简单，但完成相同功能所需的指令数一般比寄存器架构多，需要频繁的入栈出栈，栈架构指令集的执行速度会相对而言慢一些。
 
 ## 2、栈帧
 
+* 栈帧是用于支持虚拟机进行方法调用和方法执行的数据结构。栈帧随着方法调用而创建，随着方法结束而小会，栈帧的存储空间分配在 Java 虚拟机栈中。
+* 每个栈帧拥有自己的局部变量表、操作数栈和指向运行时常量池的引用
 
+### a)、局部变量表
+
+* 局部变量表的大小在编译期间就已经确定
+* Java虚拟机使用局部变量表来完成方法调用时的参数传递
+
+### b)、操作数栈
+
+* 栈的大小同样是在编译期间确定
+* Java 虚拟机提供的一些字节码指令用来从局部变量表或者对象实例的字段中复制常量或者变量到操作数栈，也有一些指令用于从操作数栈取走数据、操作数据和操作结果重新入栈
+
+整个 JVM 指令执行的过程就是局部变量表与操作数栈之间不断load、store的过程
+
+![stack.png](https://user-gold-cdn.xitu.io/2020/7/21/173711213753ad62?w=682&h=240&f=png&s=96494)
+
+### 例子:
+
+```java
+public class ScoreCalculator {
+    public void record(double score) {
+    }
+
+    public double getAverage() {
+        return 0;
+    }
+}
+public static void main(String[] args) {
+    ScoreCalculator calculator = new ScoreCalculator();
+
+    int score1 = 1;
+    int score2 = 2;
+
+    calculator.record(score1);
+    calculator.record(score2);
+
+    double avg = calculator.getAverage();
+} 
+```
+
+字节码如下:
+
+```java
+public static void main(java.lang.String[]);
+descriptor: ([Ljava/lang/String;)V
+flags: ACC_PUBLIC, ACC_STATIC
+Code:
+  stack=3, locals=6, args_size=1
+     0: new           #2                  // class ScoreCalculator
+     3: dup
+     4: invokespecial #3                  // Method ScoreCalculator."<init>":()V
+     7: astore_1
+     
+     8: iconst_1
+     9: istore_2
+     
+    10: iconst_2
+    11: istore_3
+    
+    12: aload_1
+    13: iload_2
+    14: i2d
+    15: invokevirtual #4                  // Method ScoreCalculator.record:(D)V
+    
+    18: aload_1
+    19: iload_3
+    20: i2d
+    21: invokevirtual #4                  // Method ScoreCalculator.record:(D)V
+    
+    24: aload_1
+    25: invokevirtual #5                  // Method ScoreCalculator.getAverage:()D
+    28: dstore        4
+    
+    30: return
+```
+
+* 0 ~ 7 : 新建了一个 ScoreCalculator 对象，使用 astore_1 存储在局部变量 calculator 中: astore_1的含义是把栈顶的值存储到局部变量表下标为 1 的位置上
+* 8 ~ 11 : iconst_1 和 iconst_2 用来将整数 1 和 2 加载到栈顶，istore_2 和 istore_3 用来将栈顶的元素存储到局部变量表 2 和 3的位置上
+* 
 
 ## 3、从二进制看 class 文件和字节码
 
