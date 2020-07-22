@@ -841,11 +841,64 @@ Code:
 
 * 0 ~ 7 : 新建了一个 ScoreCalculator 对象，使用 astore_1 存储在局部变量 calculator 中: astore_1的含义是把栈顶的值存储到局部变量表下标为 1 的位置上
 * 8 ~ 11 : iconst_1 和 iconst_2 用来将整数 1 和 2 加载到栈顶，istore_2 和 istore_3 用来将栈顶的元素存储到局部变量表 2 和 3的位置上
-* 
+* 12 ~ 15 : 可以看到 store 指令会把栈顶元素移除，所以下次我们要用到这些局部变量时，需要使用 load 命令重新把它加载到栈顶。比如我们要执行 calculator.record(score1)，对应的字节码如下
+
+```java
+12: aload_1
+13: iload_2
+14: i2d
+15: invokevirtual #4 // Method ScoreCalculator.record:(D)V
+```
+
+可以看到 aload_1 先从局部变量表中1的位置加载 calculator 对象，iload_2 从局部变量表中2的位置加载一个整型值，i2d 这个指令用来将整型值转为 double 并将新的值重新入栈，到目前位置参数全部就绪，可以用 invokevirutal 执行方法调用了
+
+* 24 ~ 28 : 同样是一个普通的方法调用，流程还是先 aload_1 加载 calculator 对象，invokevirtual 调用 getAverage 方法，并将栈顶元素存储到局部变量表下标为4的位置上
 
 ## 3、从二进制看 class 文件和字节码
 
+* 手动用 16 进制编辑器去修改这些字节码文件，比较容易出错，所以产生了一些字节码操作的工具，最出名的莫过于 ASM 和 Javassist
 
+# 四、字节码指令之控制转移 —— for 与 switch
+
+## 1、字节码指令分类
+
+* 加载和存储指令，比如 iload 将一个整型值从局部变量表加载到操作数栈
+* 控制转移指令，比如条件分值 ifeq
+* 对象操作，比如创建类实例的指令 new
+* 方法调用，比如 invokevirtual 指令用于调用对象的实例方法
+* 运算指令和类型转换，比如加法指令 iadd
+* 线程同步，monitorenter 和 monitorexit 两条指令来支持 synchronized 关键字的语义
+* 异常处理，比如 athrow 显示抛出异常
+
+## 2、控制转移指令
+
+## 3、switch 底层实现
+
+# 五、字节码指令之对象初始化——new，\<init> & \<clinit>
+
+## 1、new，\<init> & \<clinit>
+
+## 2、相关面试题分析
+
+## 3、思考题
+
+# 六、字节码指令之方法调用
+
+* invokestatic: 用于调用静态方法
+* invokespecial: 用于调用私有实例方法、构造器，以及使用 super 关键字调用父类的实例方法或构造器，和所实现接口的默认方法
+* invokevirtual: 用于调用非私有化实例方法
+* invokeinterface: 用于调用接口方法
+* Invokedynamic: 用于调用动态方法
+
+## 1、方法的静态绑定与动态绑定
+
+## 2、invokestatic
+
+## 3、invokevirtual vs invokespecial
+
+## 4、invokeinterface vs invokevirtual
+
+## 5、思考
 
 # 七、用HSDB来探究多态实现的原理
 
