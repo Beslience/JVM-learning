@@ -872,6 +872,66 @@ Code:
 
 ## 2、控制转移指令
 
+* 控制转移指令根据条件进行分值跳转，我们常见的if-then-else、三目表达式、for 循环、异常处理等都属于这个范畴。对应的指令集包括
+  * 条件分支: ifeq、iflt、ifle、ifne、ifgt、ifnull、ifnonnull、if_icmpeq、if_icmpne、ificmplt、if_icmpgt、if_icmple、if_icmpge、if_acmpeq 和 if_acmpne
+  * 复合条件分分支: tableswitch、loopupswitch
+  * 无条件分支: goto、goto_w、jsr、jsr_w、ret
+* for 循环例子
+
+```java
+public class MyLoopTest {
+    public static int[] numbers = new int[]{1, 2, 3};
+    public static void main(String[] args) {
+        ScoreCalculator calculator = new ScoreCalculator();
+        for (int number : numbers) {
+            calculator.record(number);
+        }
+    }
+}
+```
+
+对应的字节码:
+
+```java
+public static void main(java.lang.String[]);
+Code:
+   0: new           #2                  // class ScoreCalculator
+   3: dup
+   4: invokespecial #3                  // Method ScoreCalculator."<init>":()V
+   7: astore_1
+   
+   8: getstatic     #4                  // Field numbers:[I
+  11: astore_2
+  12: aload_2
+  13: arraylength
+  14: istore_3
+  15: iconst_0
+  16: istore        4
+  
+  18: iload         4
+  20: iload_3
+  21: if_icmpge     43
+  24: aload_2
+  25: iload         4
+  27: iaload
+  28: istore        5
+  30: aload_1
+  31: iload         5
+  33: i2d
+  34: invokevirtual #5  // Method ScoreCalculator.record:(D)V
+  
+  37: iinc          4, 1
+  40: goto          18
+ 
+  43: return
+```
+
+局部变量表:
+
+![table.png](https://user-gold-cdn.xitu.io/2020/7/23/173792c2d82212fe?w=749&h=97&f=png&s=36272)
+
+* 8 ~ 16: 是初始化循环控制变量的一个过程。加载静态变量数组引用，存储到局部变量下标为2的位置上，记为 \$array，aload_2 加载 \$array 到栈顶，调用 arraylength 指令获取数据长度存储到栈顶，随后调用 istore_3 将数组长度存储到局部变量表中第3个位置，记为 \$len
+
 ## 3、switch 底层实现
 
 # 五、字节码指令之对象初始化——new，\<init> & \<clinit>
