@@ -1615,11 +1615,63 @@ Code:
 
 ## 1、try catch 字节码分析
 
+```java
+public class TryCatchFinallyDemo {
+  	public void foo() {
+      	try {
+          	tryItOut1();
+        } catch (MyException e) {
+          	handleException(e);
+        }
+    }
+}
+```
 
+![foo.png](https://p1-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/1349ce1613ec4205848c494692f4f07d~tplv-k3u1fbpfcp-zoom-1.image)
+
+* 在编译后字节码中，每个方法都附带一个异常表（Exception table），异常表里的每一行标识一个异常处理器，由 from 指针、to 指针、target 指针、所捕获的异常类型 type 组成。这些指针的值是字节码索引，用于定位字节码，其含义是在 [from，to) 字节码范围内，抛出了异常类型为 type 的异常，就会跳转到 target 表示的字节码处。比如，上面的例子异常表表示: 在 0 到 4 中间（不包含4）如果抛出了 MyException1 的异常，就跳转到 7 执行。
+
+* 当有多个的 catch 的情况下
+
+```java
+public void foo() {
+    try {
+        tryItOut2();
+    } catch (MyException1 e) {
+        handleException1(e);
+    } catch (MyException2 e) {
+        handleException2(e);
+    }
+}
+```
+
+* 对应字节码如下:
+
+![mang.png](https://p9-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/e557ccb7f8c0434e8c90433bc7c67864~tplv-k3u1fbpfcp-zoom-1.image)
+
+* 当程序出现异常时，Java 虚拟机会从上至下遍历异常表中所有的条目，当触发异常的字节码索引值在某个异常的 [from，to) 范围内，则会判断抛出的异常与该条目想捕获的异常是否匹配
+  * 如果匹配，Java 虚拟机会将控制流转跳转到 target 指向的字节码；如果不匹配则继续遍历异常表
+  * 如果遍历完所有的异常表，还未匹配到异常处理器，那么该异常将蔓延到调用方 (caller) 中重复上述的操作。最坏的情况下虚拟机需要遍历该线程 Java 栈上所有方法的异常表
 
 ## 2、finally 字节码分析
 
+```java
+public void foo() {
+    try {
+        tryItOut1();
+    } catch (MyException1 e) {
+        handleException(e);
+    } finally {
+        handleFinally();
+    }
+}
+```
 
+* 对应的字节码如下:
+
+![finally.png](https://p6-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/6c66a2c5b2574e8781614de628168467~tplv-k3u1fbpfcp-zoom-1.image)
+
+* 字节码包含了三份 finally 语句块，都在程序正常 return 和 异常 throw 之前。其中两处在 try 和 catch 调用 return 之前，一处是在异常 throw 之前
 
 ## 3、面试题解析
 
