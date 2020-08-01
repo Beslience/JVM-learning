@@ -59,8 +59,8 @@ public class Hello {
 ```
 
  3~7行: 可以看到虽然没有写 Hello 类的构造器函数，编译器会自动加上一个默认构造器函数
-* 5行: aload_0 这个操作码是 aload_x 格式操作码中的一个。它们用来把对象引用加载操作数栈。 x 表示正在被访问的局部变量数组的位置。 在这里的0代表: 非静态的杉树都有第一个默认参数this，这里的aload_0 就是把this 入栈
-* 6行: invokespecial #1，invokespecial 指令调用实例初始化方法、私有方法、父类方法，#1 指的是常量池中的第一个，这里是方法引用 java/lang/Object."<init>":()V，也即构造器函数
+* 5行: aload_0 这个操作码是 aload_x 格式操作码中的一个。它们用来把对象引用加载操作数栈。 x 表示正在被访问的局部变量数组的位置。 在这里的0代表: 非静态的参数都有第一个默认参数this，这里的 aload_0 就是把this 入栈
+* 6行: invokespecial #1，invokespecial 指令调用实例初始化方法、私有方法、父类方法，#1 指的是常量池中的第一个，这里是方法引用 java/lang/Object."\<init>":()V，也即构造器函数
 * 7行: return，这个操作码属于ireturn、lreturn、freturn、dreturn、areturn 和 return 操作码组中的一员，其中 i 表示 int，返回整数，同类的还有 I 表示 long，f 表示 float，d 表示 double,  a 表示对象引用。没有前缀类型字母的 return 表示返回 void
 
 以上是默认的构造器函数，接下来是 9 ~ 14 行的 main 函数
@@ -721,7 +721,7 @@ public static void main(String[] args) {
 
 字节码  = 操作码 + 操作数
 
-# 二、字节码原理 —— 基于栈的执行引擎
+# 三、字节码原理 —— 基于栈的执行引擎
 
 ## 1、stack based vs registed based
 
@@ -742,7 +742,7 @@ void bar(int a, int b) {
 3: istore_3 // 将栈顶值存入局部变量表中第 3 个 slot 中
 ```
 
-* 基于寄存器的 LuaVM  的 lua袁爱民和字节码如下，查看字节码使用 luac -l -l -v -s test.lua 命令
+* 基于寄存器的 LuaVM  的 lua 源码和字节码如下，查看字节码使用 luac -l -l -v -s test.lua 命令
 
 ```
 local function my_add(a, b)
@@ -753,7 +753,7 @@ end
 1	[3]	ADD      	2 0 1
 ```
 
-* 基于寄存器的 add 指令直接把期存器 R0 和 R1 相加，结果保存在寄存器 R2 中
+* 基于寄存器的 add 指令直接把寄存器 R0 和 R1 相加，结果保存在寄存器 R2 中
 * 基于栈和基于寄存器的过程对比如下
 
 ![stack.png](https://user-gold-cdn.xitu.io/2020/7/21/1736ededc2bf2ec5?w=794&h=440&f=png&s=100717)
@@ -762,7 +762,7 @@ end
 
 ## 2、栈帧
 
-* 栈帧是用于支持虚拟机进行方法调用和方法执行的数据结构。栈帧随着方法调用而创建，随着方法结束而小会，栈帧的存储空间分配在 Java 虚拟机栈中。
+* 栈帧是用于支持虚拟机进行方法调用和方法执行的数据结构。栈帧随着方法调用而创建，随着方法结束而销毁，栈帧的存储空间分配在 Java 虚拟机栈中。
 * 每个栈帧拥有自己的局部变量表、操作数栈和指向运行时常量池的引用
 
 ### a)、局部变量表
@@ -930,17 +930,209 @@ Code:
 
 ![table.png](https://user-gold-cdn.xitu.io/2020/7/23/173792c2d82212fe?w=749&h=97&f=png&s=36272)
 
-* 8 ~ 16: 是初始化循环控制变量的一个过程。加载静态变量数组引用，存储到局部变量下标为2的位置上，记为 \$array，aload_2 加载 \$array 到栈顶，调用 arraylength 指令获取数据长度存储到栈顶，随后调用 istore_3 将数组长度存储到局部变量表中第3个位置，记为 \$len
+* 8 ~ 16: 是初始化循环控制变量的一个过程。加载静态变量数组引用，存储到局部变量下标为2的位置上，记为 \$array，aload_2 加载 \$array 到栈顶，调用 arraylength 指令获取数据长度存储到栈顶，随后调用 istore_3 将数组长度存储到局部变量表中第3个位置，记为 \$len。iconst_0 将整型值 0 加载到栈顶，随后将它存储到局部变量表第 4 个位置，记为 $i，写为伪代码如下
+
+```
+$array = numbers;
+$len = $array.arraylength
+$i = 0
+```
+
+* 18 ~ 34: 是真正的循环体。首先加载 \$i 和 \$len 到栈顶，然后调用 if_icmpge 进行比较，如果 \$i >  $len，直接跳转到指令43，也就是 return，函数结束。如果 \$i < \$len，执行循环体，加载 \$array、\$i，然后 iaload 指令把下标为 \$i 的数组元素加载到操作数栈上，随后存储到局部变量表下标为 5 的位置上，记为 \$item。随后调用 invokevirtual 指令来执行 record 方法
+* 37 ~ 40: 执行循环后的 \$i 自增操作
+
+```
+@start: if ($i >= $len) return;
+$item = $array[$i]
+++ $i
+goto @start
+```
 
 ## 3、switch 底层实现
+
+* switch-case 的底层实现，实际上编译器将使用 tableswitch 和 loopupswitch 两个指令来生成 switch 语句的编译代码
+
+```
+int chooseNear(int i) {
+    switch (i) {
+        case 100: return 0;
+        case 101: return 1;
+        case 104: return 4;
+        default: return -1;
+    }
+}
+
+字节码如下：
+
+0: iload_1
+1: tableswitch   { // 100 to 104
+         100: 36
+         101: 38
+         102: 42
+         103: 42
+         104: 40
+     default: 42
+}
+
+36: iconst_0   // return 0
+37: ireturn
+38: iconst_1   // return 1
+39: ireturn
+40: iconst_4   // return 4
+41: ireturn
+42: iconst_m1  // return -1
+43: ireturn
+```
+
+* 代码中的 case 中并没有出现 102、103，在字节码中出现了。编译器对 case 的值做分析，如果 case 的值比较紧凑，中间有少量断层或者没有断层，会采用 tableswitch 来实现 switch-case，有断层的会生成一些虚假的 case 帮忙补齐连续，这样可以实现 O(1) 事件复杂度的查找: 因为 case 已经被补齐为连续的，通过游标就可以一次找到
+
+伪代码如下
+
+```
+int val = pop();                // pop an int from the stack
+if (val < low || val > high) {  // if its less than <low> or greater than <high>,
+    pc += default;              // branch to default 
+} else {                        // otherwise
+    pc += table[val - low];     // branch to entry in table
+}
+```
+
+* case 值断层严重的例子
+
+```
+int chooseFar(int i) {
+    switch (i) {
+        case 1: return 1;
+        case 10: return 10;
+        case 100: return 100;
+        default: return -1;
+    }
+}
+
+对应字节码
+
+0: iload_1
+1: lookupswitch  { // 3
+           1: 36
+          10: 38
+         100: 41
+     default: 44
+}
+```
+
+* 如果还是采用上面那种 tableswitch 补齐的方式，就会生成上百个假 case，class 文件也爆炸式增长，这种做法显然不合理。loopupswitch 的键值是经过排序的，在查找上可以采用二分查找的方式，事件复杂度为 O(log n)
 
 # 五、字节码指令之对象初始化——new，\<init> & \<clinit>
 
 ## 1、new，\<init> & \<clinit>
 
+```java
+ScoreCalculator calculator = new ScoreCalculator();
+
+对应的字节码如下
+
+0: new           #2                  // class ScoreCalculator
+3: dup
+4: invokespecial #3                  // Method ScoreCalculator."<init>":()V
+
+7: astore_1
+```
+
+* 一个对象创建的过程: new、dup、invokespecial
+* 类的构造器函数是以 \<init> 函数名出现的，被称为实例的初始化方法。调用 new 指令时，只要创建了一个类的实例，但是还没有调用构造器函数，使用 invokespecial 调用了 \<init> 后才真正调用了构造器函数，正是因为需要调用这个函数才导致必须要有一个 dup 指令，不然调用完 \<init> 函数以后，操作数为空，就再也找不回刚刚创建的对象。
+
+![dup.png](https://user-gold-cdn.xitu.io/2020/7/24/17380c190d037aa5?w=761&h=568&f=png&s=125188)
+
+* \<init> 调用构造器函数，\<clinit> 是类的静态初始化比 \<init> 调用得更早一些，\<clinit> 不会直接被调用，在下面四个指令触发调用: new，getstatic， putstatic or invokestatic。也就是，初始化一个类实例、访问一个静态变量或者一个静态方法，类的初始化方法就会被触发
+
 ## 2、相关面试题分析
 
+```java
+public class A {
+    static {
+        System.out.println("A init");
+    }
+    public A() {
+        System.out.println("A Instance");
+    }
+}
+
+public class B extends A {
+    static {
+        System.out.println("B init");
+    }
+    public B() {
+        System.out.println("B Instance");
+    }
+}
+```
+
+* 问题：`B[] arr = new B[10]` 会输出什么？
+* 数组的初始化指令
+
+```
+bipush 10
+anewarray 'B'
+astore 1
+```
+
+* anewarray 接收栈顶的元素 (数组的长度)，新建一个数组引用。由此可见新建一个 B 的数组没有触发任何类或者实例的初始化操作
+
 ## 3、思考题
+
+```java
+class Father {
+    private int i = test();
+    private static int j = method();
+    static {
+        System.out.print("(1)");
+    }
+    Father() {
+        System.out.print("(2)");
+    }
+    {
+        System.out.print("(3)");
+    }
+    public int test() {
+        System.out.print("(4)");
+        return 1;
+    }
+    public static int method() {
+        System.out.print("(5)");
+        return 1;
+    }
+}
+public class Son extends Father {
+    private int i = test();
+    private static int j = method();
+    static {
+        System.out.print("(6)");
+    }
+    Son() {
+        System.out.print("(7)");
+    }
+    {
+        System.out.print("(8)");
+    }
+    public int test() {
+        System.out.print("(9)");
+        return 1;
+    }
+    public static int method() {
+        System.out.print("(10)");
+        return 1;
+    }
+    public static void main(String[] args) {
+        Son s1 = new Son();
+        System.out.println();
+        Son s2 = new Son();
+    }
+}
+```
+
+* 初始化顺序: （父类静态变量 => 父类静态块)(有先后顺序) => 子类静态变量 => 子类静态块 => 父类实例变量 => 父类代码块 => 父类初始化方法 => 子类实例变量 => 子类代码块 => 子类初始化方法
+* 如果调用静态方法，不会涉及到多态，在那个类中调用静态方法，优先找本类，否则搜索父类，再搜索父类，如果在父接口找不到则报错
+* 如果调用实例方法，会动态分派，动态解析，只用实际类型的实例方法
 
 # 六、字节码指令之方法调用
 
@@ -952,13 +1144,59 @@ Code:
 
 ## 1、方法的静态绑定与动态绑定
 
+* Java 的两种方法绑定方式: 静态绑定与动态绑定。在编译时能确定目标方法叫做静态绑定；在运行时根据调用者的类型动态识别的叫动态绑定
+* Invokestatis 和 invokespecial 这两个指令对应的方法时静态绑定的，invokestatic 调用的是类的静态方法，在编译期确定，运行期不会改变。剩下的三个都属于动态绑定
+
 ## 2、invokestatic
+
+* invokestatic 用来调用静态方法，即使用 static 关键字修饰的方法。它要调用的方法在编译期间确定，运行期不会修改，属于静态板顶。它也是所有静态方法调用指令里面最快的
 
 ## 3、invokevirtual vs invokespecial
 
+* invokevirtual: 用来调用 public、protected、package 访问级别的方法
+* invokespecial: 包括实例构造方法、私有方法（private 修饰的方法）和父类的方法（即 super 关键字调用的方法）。这些方法可以直接确定实际执行的方法的实现，与 invokestatic 一样，也属于静态绑定
+* invokevirtual 用在方法要根据对象类型不同动态选择的情况，在编译期不确定
+
 ## 4、invokeinterface vs invokevirtual
 
-## 5、思考
+* invokeinterface 用于调用接口方法，在运行时再确定一个实现此接口的对象
+
+```java
+class A {
+    public void method1() { }
+    public void method2() { }
+    public void method3() { }
+}
+
+class B extends A {
+    public void method2() { } // overridden from BaseClass
+    public void method4() { }
+}
+```
+
+![method.png](https://user-gold-cdn.xitu.io/2020/7/25/17383bdb6ddfcc28?w=675&h=354&f=png&s=177691)
+
+* 现在 B类的虚方法保留了父类 A中方法的顺序，只是覆盖了 method2() 指向的函数连接和新增了 method4()。假设这时需要调用 method2() 方法，invokevirtual 只需要直接取找虚方法表位置2 的函数应用即可
+
+```java
+interface X {
+    void methodX()
+}
+class B extends A implements X {
+    public void method2() { } // overridden from BaseClass
+    public void method4() { }
+    public void methodX() { }
+}
+Class C implements X {
+    public void methodC() { }
+    public void methodX() { }
+}
+```
+
+![interface.png](https://user-gold-cdn.xitu.io/2020/7/25/17383c051f4234d0?w=636&h=352&f=png&s=165798)
+
+* 这种情况下，B 类的MethodX 在位置5的地方，C类的 methodX 在位置为 2 的地方，如果要用 invokevirtual 调用 methodX 就不能直接从固定的虚方法表索引位置拿到对应的方法连接。
+* invokeinteface 不得不搜索整个虚方法来找到对应方法，效率上远不如 invokevirtual
 
 # 七、用HSDB来探究多态实现的原理
 
@@ -976,15 +1214,156 @@ vtable 是 Java 实现多态的基石，如果一个方法被继承和重写，�
 
 ## 1、MethodHandle 是什么
 
+* MethodHandle 称为方法句柄或方法指针
+* 使得 Java 可以像其他语言一样把函数当做参数进行传递
+
+```java
+public class Foo {
+  	public void print(String s) {
+      	System.out.println("hello, " + s);
+    } 
+  	public static void main(String[] args) throws Throwable {
+      	Foo foo = new Foo() {
+          	MethodType methodType = MethodType.methodType(void.class, String.class);
+          	MethodHandle methodHandle = MethodHandles.loopup().findVirtual(Foo.class, "print", methodType);
+          	methodHandle.invoke(foo, "world");
+        }
+    }
+}
+```
+
+* 使用 MethodHandle 方法的步骤如下所示
+  * 1）创建 MethodType 对象，MethodType 用来表示方法签名，每个MethodHandle 都有一个 MethodType 实例，用来指定方法的返回值类型和各个参数类型
+  * 2）调用 MethodHandles.lookup 静态方法返回 MethodHandle.Lookup 对象，这个对象表示查找的上下文，根据方法的不同类型通过 findStatic、findSpecial、findVirtual 等方法查找方法签名为 MethodType 的方法句柄
+  * 3）拿到方法句柄以后就可以调用具体的方法了，通过放入目标方法参数，使用 invoke 或 invokeExact 进行方法的调用
+
 ## 2、什么是invokedynamic
 
+* Invokedynamic 则把如何查找目标方法的决定权从虚拟机下放到具体的用户代码中
+* 调用流程如下:
+  * JVM 首次当执行 invokedynamic 指令时会调用引导方法
+  * 引导方法返回 CallSite 对象，CallSite 内部根据方法签名进行目标方法查找。它的 getTarget 方法返回方法句柄（MethodHandle）对象。
+  * 在 CallSite 没有变化的情况下，MethodHandle 可以一直被调用，如果 CallSite 有变化的话重新查找即可
 
+![dynamic.png](https://p3-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/5e6e83df68664c4690c8598b817c71a6~tplv-k3u1fbpfcp-zoom-1.image)
 
 # 九、匿名内部类与 lambda
 
 ## 1、测试匿名内部类的实现
 
+```java
+Test.java
+public static void main(String[] args) {   
+     Runnable r1 = new Runnable() {
+        @Override
+        public void run() {
+            System.out.println("hello, inner class");
+        }
+    };
+    r1.run();
+}
+```
+
+* 使用 javac 进行编译会生成两个 class 文件 Test.class 和 Test$1.class
+
+* main 函数简化过的字节码如下:
+
+```
+public static void main(java.lang.String[]);
+Code:
+  stack=2, locals=2, args_size=1
+     0: new           #2                  // class Test$1
+     3: dup
+     4: invokespecial #3                  // Method Test$1."<init>":()V
+     7: astore_1
+     8: aload_1
+     9: invokeinterface #4,  1            // InterfaceMethod java/lang/Runnable.run:()V
+    14: return
+```
+
+* 第 0 ~ 7 行: 新建 Test$1 实例对象
+* 第 8 ~ 9 行: 执行 Test$1 对象的 run 方法
+
+```java
+class Test$1 implements Runnable {
+    public Test$1(Test test) {
+    }
+
+    @Override
+    public void run() {
+        System.out.println("hello, inner class");
+    }
+}
+public class Test {
+    public static void main(String[] args) {
+        Runnable r1 = new Test$1(this);
+        r1.run();
+    }
+}
+```
+
+* 匿名内部类是编译器间生成新的 class 文件实现的
+
 ## 2、测试lambda表达式
+
+```java
+public static void main(String[] args) {
+    Runnable r = ()->{
+        System.out.println("hello, lambda");
+    };
+    r.run();
+}
+```
+
+* 使用 javac 编译，发现只生成了 Test.class 一个类文件，并没有生成匿名内部类，使用 javap -p -s -c -v -l Test 查看对应字节码如下
+
+```
+public static void main(java.lang.String[]);
+descriptor: ([Ljava/lang/String;)V
+flags: ACC_PUBLIC, ACC_STATIC
+Code:
+  stack=1, locals=2, args_size=1
+     0: invokedynamic #2,  0              // InvokeDynamic #0:run:()Ljava/lang/Runnable;
+     5: astore_1
+     6: aload_1
+     7: invokeinterface #3,  1            // InterfaceMethod java/lang/Runnable.run:()V
+    12: return
+
+private static void lambda$main$0();
+Code:
+     0: getstatic     #4                  // Field java/lang/System.out:Ljava/io/PrintStream;
+     3: ldc           #5                  // String hello, lambda
+     5: invokevirtual #6                  // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+     8: return
+```
+
+* 出现了一个名为 lambda\$main\$0 的静态方法
+
+```java
+private static void lambda$main$0() {
+    System.out.println("hello, lambda");
+}
+```
+
+* 第 0 行中 #2 标识常量池中 #2，它有指向了 #0:#23
+
+```
+Constant pool:
+   #1 = Methodref          #8.#18         // java/lang/Object."<init>":()V
+   #2 = InvokeDynamic      #0:#23         // #0:run:()Ljava/lang/Runnable;
+   ...
+   #23 = NameAndType        #35:#36        // run:()Ljava/lang/Runnable;
+
+BootstrapMethods:
+  0: #20 invokestatic java/lang/invoke/LambdaMetafactory.metafactory:(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;
+    Method arguments:
+      #21 ()V
+      #22 invokestatic Test.lambda$main$0:()V
+      #21 ()V
+```
+
+* 其中 #0 是一个特殊的查找，对应 BootstrapMethods 中的 0 行，可以看到这是一个对静态方法 LambdaMetafactory.metafactory() 的调用，它的返回值时 java.lang.invoke.CallSite 对象，这个对象代表了真正执行的目标方法调用
+* 
 
 ## 3、为什么Java8的Lambda表达式要基于invokedynamic
 
@@ -994,15 +1373,243 @@ vtable 是 Java 实现多态的基石，如果一个方法被继承和重写，�
 
 ## 1、字节码分析笔试题
 
-## 2、
+```java
+public static void foo() {
+    int i = 0;
+    for (int j = 0; j < 50; j++)
+        i = i++;
+    System.out.println(i);
+}
+```
 
-## 3、题目
+* 字节码 javap -v 得到如下
+
+```
+public static void foo();
+     0: iconst_0
+     1: istore_0
+     2: iconst_0
+    
+     3: istore_1
+     4: iload_1
+     5: bipush        50
+     7: if_icmpge     21
+     
+    10: iload_0
+    11: iinc          0, 1
+    14: istore_0
+    
+    15: iinc          1, 1
+    18: goto          4
+    
+    21: getstatic     #3                  // Field java/lang/System.out:Ljava/io/PrintStream;
+    24: iload_0
+    25: invokevirtual #4                  // Method java/io/PrintStream.println:(I)V
+    28: return
+```
+
+* 对应 i = i++ 的字节码是 10 ~ 14 行
+  * 10 : iload_0 把局部变量白哦 slot = 0 的变量 (i) 加载到 操作数栈上
+  * 11 : iinc 0,1 对局部变量表 slot = 0 的变量 (i) 直接加 1，但是这时候栈顶的元素没有变化，还是0
+  * 14 : istore_0 把栈顶元素出栈复制给局部变量表 slot = 0 的变量，也就是 i。在这时，局部变量 i 又被复制为0了，前面的 iinc 指令对 i 的加一操作前功尽弃。
+
+![i++.png](https://p6-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/733f046bac534b61accdcd9aa6a66dd5~tplv-k3u1fbpfcp-zoom-1.image)
+
+## 2、++i 又会是怎样
+
+```java
+public static void foo() {
+    int i = 0;
+    for (int j = 0; j < 50; j++)
+        i = ++i;
+    System.out.println(i);
+}
+```
+
+* 对应字节码如下 javap -v
+
+```
+public static void foo();
+     0: iconst_0
+     1: istore_0
+     2: iconst_0
+     3: istore_1
+     4: iload_1
+     5: bipush        50
+     7: if_icmpge     21
+     
+    10: iinc          0, 1
+    13: iload_0
+    14: istore_0
+    
+    15: iinc          1, 1
+    18: goto          4
+    21: getstatic     #3                  // Field java/lang/System.out:Ljava/io/PrintStream;
+    24: iload_0
+    25: invokevirtual #4                  // Method java/io/PrintStream.println:(I)V
+    28: return
+```
+
+* 可以看出 i = ++i 先对局部变量表 slot = 0 的变量加1，然后才把它加载到操作数栈上，随后又从操作数栈上出栈赋值给局部变量表，最后写回去的值也是最新的值
+
+![++i.png](https://p3-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/7bd292a04e134a1fae6c97135c68d8ac~tplv-k3u1fbpfcp-zoom-1.image)
+
+## 3、更难的题目
+
+```java
+public static void bar() {
+    int i = 0;
+    i = i++ + ++i;
+    System.out.println("i=" + i);
+}
+```
+
+* add 指令的第一个参数值为0，第二个参数值为2，最终输出的结果为2
+
+```java
+public static void bar();
+     0: iconst_0
+     1: istore_0
+     
+     2: iload_0
+     3: iinc          0, 1
+     6: iinc          0, 1
+     9: iload_0
+    10: iadd
+    11: istore_0
+```
+
+![all.png](https://p3-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/fe0787d5357a49b4bd1bcb02edebf3b3~tplv-k3u1fbpfcp-zoom-1.image)
 
 # 十一、字节码角度看语法糖 -- String 的 switch实现
 
 ## 1、switch String 的 demo
 
+* switch-case 依据 case 值的稀疏程度，分别有两个指令 tableswitch 和 loopupswitch，但这个两个指令都只成支持整型值。而 switch-case 支持 String类型的值
+
+```java
+public int test(String name) {
+    switch (name) {
+        case "Java":
+            return 100;
+        case "Kotlin":
+            return 200;
+        default:
+            return -1;
+    }
+}
+```
+
+* javap -v 字节码如下:
+
+```java
+ 0: aload_1
+ 1: astore_2
+ 2: iconst_m1
+ 3: istore_3
+ 
+ 4: aload_2
+ 5: invokevirtual #2                  // Method java/lang/String.hashCode:()I
+ 8: lookupswitch  { // 2
+     -2041707231: 50 // 对应 "Kotlin".hashCode()
+         2301506: 36 // 对应 "Java".hashCode()
+         default: 61
+    }
+    
+36: aload_2
+37: ldc           #3                  // String Java
+39: invokevirtual #4                  // Method java/lang/String.equals:(Ljava/lang/Object;)Z
+42: ifeq          61
+45: iconst_0
+46: istore_3
+47: goto          61
+
+50: aload_2
+51: ldc           #5                  // String Kotlin
+53: invokevirtual #4                  // Method java/lang/String.equals:(Ljava/lang/Object;)Z
+56: ifeq          61
+59: iconst_1
+60: istore_3
+
+61: iload_3
+62: lookupswitch  { // 2
+               0: 88
+               1: 91
+         default: 95
+    }
+    
+// 88 ~ 90
+88: bipush        100
+90: ireturn
+
+91: sipush        200
+94: ireturn
+
+95: iconst_m1
+96: ireturn
+```
+
+* 局部变量表如下: 
+
+![table.png](https://p3-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/57b7db7212ae411aa3d26023f5263d88~tplv-k3u1fbpfcp-zoom-1.image)
+
+* 0 ~ 3: 做一些初始化操作，把入参 name 赋值给局部变量表下标为 2 的变量，记为 tmpName, 初始化局部变量表 3 位置的变量为 -1，记为 matchIndex
+* 4 ~ 8: 对 tmpName 调用了 hashCode 函数，得到一个整型值。因为一般而言 hash 都比较离散，所以没有选用 tableswitch 而是用 loopupswitch 来作为 switch case 的实现
+* 36 ~ 47: 如果 hashCode dengyu  "Kotlin".hashCode() 会跳转到这部分字节码。首选把字符串进行真正意义上的 equals 比较，看是否相等，是否相等使用的是 ifeq 指令， ifeq 的含义是 ifeq 0 则跳转到对应字节码行出，实际上是等于 false 跳转。这里如果相等则把 matchIndex 赋值为0
+* 61 ~ 96: 进行最后的 case 分值执行
+
 ## 2、 hashCode 冲突如何处理
+
+* 比如 "Aa" 和 ”BB“ 的 hashCode 都是2112
+
+```java
+public int testSameHash(java.lang.String);
+descriptor: (Ljava/lang/String;)I
+flags: ACC_PUBLIC
+Code:
+  stack=2, locals=4, args_size=2
+     0: aload_1
+     1: astore_2
+     2: iconst_m1
+     3: istore_3
+     
+     4: aload_2
+     5: invokevirtual #2                  // Method java/lang/String.hashCode:()I
+     8: lookupswitch  { // 1
+                2112: 28
+             default: 53
+        }
+        
+    28: aload_2
+    29: ldc           #3                  // String BB
+    31: invokevirtual #4                  // Method java/lang/String.equals:(Ljava/lang/Object;)Z
+    34: ifeq          42
+    37: iconst_1
+    38: istore_3
+    39: goto          53
+    
+    42: aload_2
+    43: ldc           #5                  // String Aa
+    45: invokevirtual #4                  // Method java/lang/String.equals:(Ljava/lang/Object;)Z
+    48: ifeq          53
+    51: iconst_0
+    52: istore_3
+    
+    53: iload_3
+    54: lookupswitch  { // 2
+                   0: 80
+                   1: 83
+             default: 87
+        }
+    80: bipush        100
+    82: ireturn
+    83: sipush        200
+    86: ireturn
+    87: iconst_m1
+    88: ireturn
+```
+
+* 可以看到 34 行在 hashCode 冲突的情况下，JVM 的处理不过是多一次字符串相等的比较。与 "BB" 不相等的情况，会在继续判断是否等于 "Aa"
 
 # 十二、try catch finally 为啥 finally 语句一定会执行
 
