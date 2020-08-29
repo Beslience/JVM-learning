@@ -1,0 +1,114 @@
+二进制文件TestLambda包含package9.TestLambda
+Classfile /Users/cvter/Desktop/JVM-learning/code/src/package9/TestLambda.class
+  Last modified 2020-8-27; size 1034 bytes
+  MD5 checksum d4fc097e1213bc180a73588434efa581
+  Compiled from "TestLambda.java"
+public class package9.TestLambda
+  minor version: 0
+  major version: 52
+  flags: ACC_PUBLIC, ACC_SUPER
+Constant pool:
+   #1 = Methodref          #8.#18         // java/lang/Object."<init>":()V
+   #2 = InvokeDynamic      #0:#23         // #0:run:()Ljava/lang/Runnable;
+   #3 = InterfaceMethodref #24.#25        // java/lang/Runnable.run:()V
+   #4 = Fieldref           #26.#27        // java/lang/System.out:Ljava/io/PrintStream;
+   #5 = String             #28            // hello, lambda
+   #6 = Methodref          #29.#30        // java/io/PrintStream.println:(Ljava/lang/String;)V
+   #7 = Class              #31            // package9/TestLambda
+   #8 = Class              #32            // java/lang/Object
+   #9 = Utf8               <init>
+  #10 = Utf8               ()V
+  #11 = Utf8               Code
+  #12 = Utf8               LineNumberTable
+  #13 = Utf8               main
+  #14 = Utf8               ([Ljava/lang/String;)V
+  #15 = Utf8               lambda$main$0
+  #16 = Utf8               SourceFile
+  #17 = Utf8               TestLambda.java
+  #18 = NameAndType        #9:#10         // "<init>":()V
+  #19 = Utf8               BootstrapMethods
+  #20 = MethodHandle       #6:#33         // invokestatic java/lang/invoke/LambdaMetafactory.metafactory:(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;
+  #21 = MethodType         #10            //  ()V
+  #22 = MethodHandle       #6:#34         // invokestatic package9/TestLambda.lambda$main$0:()V
+  #23 = NameAndType        #35:#36        // run:()Ljava/lang/Runnable;
+  #24 = Class              #37            // java/lang/Runnable
+  #25 = NameAndType        #35:#10        // run:()V
+  #26 = Class              #38            // java/lang/System
+  #27 = NameAndType        #39:#40        // out:Ljava/io/PrintStream;
+  #28 = Utf8               hello, lambda
+  #29 = Class              #41            // java/io/PrintStream
+  #30 = NameAndType        #42:#43        // println:(Ljava/lang/String;)V
+  #31 = Utf8               package9/TestLambda
+  #32 = Utf8               java/lang/Object
+  #33 = Methodref          #44.#45        // java/lang/invoke/LambdaMetafactory.metafactory:(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;
+  #34 = Methodref          #7.#46         // package9/TestLambda.lambda$main$0:()V
+  #35 = Utf8               run
+  #36 = Utf8               ()Ljava/lang/Runnable;
+  #37 = Utf8               java/lang/Runnable
+  #38 = Utf8               java/lang/System
+  #39 = Utf8               out
+  #40 = Utf8               Ljava/io/PrintStream;
+  #41 = Utf8               java/io/PrintStream
+  #42 = Utf8               println
+  #43 = Utf8               (Ljava/lang/String;)V
+  #44 = Class              #47            // java/lang/invoke/LambdaMetafactory
+  #45 = NameAndType        #48:#52        // metafactory:(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;
+  #46 = NameAndType        #15:#10        // lambda$main$0:()V
+  #47 = Utf8               java/lang/invoke/LambdaMetafactory
+  #48 = Utf8               metafactory
+  #49 = Class              #54            // java/lang/invoke/MethodHandles$Lookup
+  #50 = Utf8               Lookup
+  #51 = Utf8               InnerClasses
+  #52 = Utf8               (Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;
+  #53 = Class              #55            // java/lang/invoke/MethodHandles
+  #54 = Utf8               java/lang/invoke/MethodHandles$Lookup
+  #55 = Utf8               java/lang/invoke/MethodHandles
+{
+  public package9.TestLambda();
+    descriptor: ()V
+    flags: ACC_PUBLIC
+    Code:
+      stack=1, locals=1, args_size=1
+         0: aload_0
+         1: invokespecial #1                  // Method java/lang/Object."<init>":()V
+         4: return
+      LineNumberTable:
+        line 10: 0
+
+  public static void main(java.lang.String[]);
+    descriptor: ([Ljava/lang/String;)V
+    flags: ACC_PUBLIC, ACC_STATIC
+    Code:
+      stack=1, locals=2, args_size=1
+         0: invokedynamic #2,  0              // InvokeDynamic #0:run:()Ljava/lang/Runnable;
+         5: astore_1
+         6: aload_1
+         7: invokeinterface #3,  1            // InterfaceMethod java/lang/Runnable.run:()V
+        12: return
+      LineNumberTable:
+        line 13: 0
+        line 16: 6
+        line 17: 12
+
+  private static void lambda$main$0();
+    descriptor: ()V
+    flags: ACC_PRIVATE, ACC_STATIC, ACC_SYNTHETIC
+    Code:
+      stack=2, locals=0, args_size=0
+         0: getstatic     #4                  // Field java/lang/System.out:Ljava/io/PrintStream;
+         3: ldc           #5                  // String hello, lambda
+         5: invokevirtual #6                  // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+         8: return
+      LineNumberTable:
+        line 14: 0
+        line 15: 8
+}
+SourceFile: "TestLambda.java"
+InnerClasses:
+     public static final #50= #49 of #53; //Lookup=class java/lang/invoke/MethodHandles$Lookup of class java/lang/invoke/MethodHandles
+BootstrapMethods:
+  0: #20 invokestatic java/lang/invoke/LambdaMetafactory.metafactory:(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;
+    Method arguments:
+      #21 ()V
+      #22 invokestatic package9/TestLambda.lambda$main$0:()V
+      #21 ()V

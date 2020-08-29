@@ -1202,13 +1202,24 @@ Class C implements X {
 
 ## 1、HSDB基础
 
+* HSDB 全称是: Hotspot Debugger，是内置的 JVM 工具，可用来深入分析 JVM 运行时的内部状态。HSDB 位于 JDK 安装目录的 lib/sa-jdi.jar 中。启动 HSDB
+
+```
+sudo java -cp sa-jdi.jar sun.jvm.hotspot.HSDB
+```
+
+
+
 启动 =》 Tools (类列表、堆信息、inspect对象内存、死锁检测)
 
 ## 2、利用HSDB来看多态的基础 vtable(??为什么要叫vtable)
 
 vtable 是 Java 实现多态的基石，如果一个方法被继承和重写，会把 vtable 中指向父类的方法指针指向子类自己的实现
 
-
+* Java 子类会继承父类的 vtable。Java 所有的类都会继承 java.lang.Object 类，Object 类有 5 个虚方法可以被继承和重写。当一个类不包含任何方法时，vtable 的长度也最小为5，标识 Object 类的 5个虚方法
+* final 和 static 修饰的方法不会被放到 vtable 方发表里
+* 当子类重写了父类方法，子类 vtable 原本指向父类的方法指针会被替换为子类的方法指针
+* 子类的 vtable 保持了父类的 vtable 顺序
 
 # 八、invokedynamic 指令解读
 
@@ -1226,7 +1237,7 @@ public class Foo {
       	Foo foo = new Foo() {
           	MethodType methodType = MethodType.methodType(void.class, String.class);
           	MethodHandle methodHandle = MethodHandles.loopup().findVirtual(Foo.class, "print", methodType);
-          	methodHandle.invoke(foo, "world");
+          	methodHandle.invokeExact(foo, "world");
         }
     }
 }
@@ -1363,11 +1374,86 @@ BootstrapMethods:
 ```
 
 * 其中 #0 是一个特殊的查找，对应 BootstrapMethods 中的 0 行，可以看到这是一个对静态方法 LambdaMetafactory.metafactory() 的调用，它的返回值时 java.lang.invoke.CallSite 对象，这个对象代表了真正执行的目标方法调用
-* 
+
+* 核心的 metafactory 函数定义如下
+
+```java
+public static CallSite metafactory {
+  MethodHandles.Lookup caller,
+  String invokedName,
+  MethodType invokedType,
+  MethodType samMethodType,
+  MethodHandle implMethod,
+  MethodType instantiatedMethodType
+}
+```
+
+* caller: JVM 提供的查找上下文
+* invokedName: 标识调用函数名，在本例中 invokedName 为 "run"
+* sameMethodType: 函数式接口定义的方法签名 (参数类型和返回值类型)，本例中为 run 方法的签名 "()void"
+* implMethod：编译时生成的 lambda 表达式对应的静态方法 inovkestatic Test.lambda\$main\$0
+* instantiatedMethodType: 一般和 samMethodType 是一样或是它的一个特例，在本例中是 "()void"
+
+* metafactory 方法的内部细节是整个 lambda 表达式最复杂的地方. 源码如下
+
+![image-20200828082821936](asserts/image-20200828082821936.png)
+
+* 跟进 InnerClassLambdaMetafactory 类，看到它在摸摸生成新的内部类，类名的规则是 ClassName?Lambda1，其中 ClassName 是 lambda 所在的类名，后面的数字按生成的顺序依次递增
+
+![image-20200828083050526](asserts/image-20200828083050526.png)
+
+
+
+* 可以通过以下方法打印具体生成的类名
+
+```java
+Runnable r = ()->{
+    System.out.println("hello, lambda");
+};
+
+System.out.println(r.getClass().getName());
+
+输出：
+Test$$Lambda$1/1108411398
+```
+
+* 其中斜杆 / 后面的数字 1108411398 是类队形的 hashcode 值
+* nnerClassLambdaMetafactory 这个类的静态初始化方法里有一个开关可以选择是否把生成的类 dump 到磁盘中
+
+```java
+// For dumping generated classes to disk, for debugging purposes
+private static final ProxyClassesDumper dumper;
+static {
+        final String key = "jdk.internal.lambda.dumpProxyClasses";
+        String path = AccessController.doPrivileged(
+                new GetPropertyAction(key), null,
+                new PropertyPermission(key , "read"));
+        dumper = (null == path) ? null : ProxyClassesDumper.getInstance(path);
+    }
+```
+
+* 使用 java -Djdk.internal.lambda.dumpProxyClasses=. Test 运行 Test类会发现在运行期间生成了一个新的内部类: Test?Lambda$1.class。这个类是由 InnerClassLambdaMetafactory 使用 ASM 字节码结束动态生成的，只是默认情况下看不到而已
+* 这个类实现了 Runnable 接口，并在 run 方法里调用了 Test 类的静态方法 lambda\$main\$0()，类似如下代码
+
+```java
+final class Test?Lambda$1 implements Runnable {
+    @Override
+    public void run() {
+        Test.lambda$main$0();
+    }
+}
+```
+
+* 整体过程如下:
+  * lambda 表达式声明的地方会生成一个 invokedynamic 指令，同时编译器生成一个对应的引导方法 (Bootstrap Method)
+  * 第一次执行 invokedynamic 指令时，会调用对应的引导方法 (Bootstrap Method)，该引导方法会调用 LambdaMetafactory.metafactory 方法动态生成内部类
+  * 引导方法会返回一个动态调用 CallSite 对象，这个 CallSite 会链接最终调用的实现了 Runnable 接口的实现类
+  * lambda 表达式中的内容会被编译成静态方法，前面动态生成的内部类会直接调用该静态方法
+  * 真正执行 lambda 调用的还是用 invokeinterface 指令 
 
 ## 3、为什么Java8的Lambda表达式要基于invokedynamic
 
-
+* invokedynamic 与 之前四个 invoke 指令最大的不同就在于它把方法分派的逻辑从虚拟机层面下放到程序语言。lambda 表达式采用的方式是不在编译期间就生成匿名内部类，而是提供了一个稳定的字节码二进制标识规范，对用户而言看到的只有 invokedynamic 这样一个简单的指令。用 invokedynamic 来实现就是把翻译的逻辑隐藏在 JDK 的实现中，后续想替换实现方法非常简单，只用修改 LambdaMetafactory.metafactory 里的逻辑即可， 这种方法把 lambda 翻译的策略由编译期间推迟到运行时。w
 
 # 十、字节码角度分析面试题 ——i++ 、 ++i 区别
 
@@ -1672,16 +1758,113 @@ public void foo() {
 ![finally.png](https://p6-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/6c66a2c5b2574e8781614de628168467~tplv-k3u1fbpfcp-zoom-1.image)
 
 * 字节码包含了三份 finally 语句块，都在程序正常 return 和 异常 throw 之前。其中两处在 try 和 catch 调用 return 之前，一处是在异常 throw 之前
+* Java  采用方式是复制 finally 代码块的内容，分别放在 try catch 代码块所有正常 return 和异常 throw 之前。
 
 ## 3、面试题解析
 
+```java
+题目1：
+public static int func() {
+    try {
+        return 0;
+    } catch (Exception e){
+        return 1;
+    } finally {
+        return 2;
+    }
+}
+返回 2
 
+题目2：
+public static int func() {
+    try {
+        int a = 1 / 0;
+        return 0;
+    } catch (Exception e) {
+        return 1;
+    } finally {
+        return 2;
+    }
+}
+返回 2
+
+题目3：
+public static int func() {
+    try {
+        int a = 1 / 0;
+        return 0;
+    } catch (Exception e) {
+        int b = 1 / 0;
+    } finally {
+        return 2;
+    }
+}
+返回 2
+```
 
 # 十三、字节码角度看 try with resource 语法糖 -- 资源释放不用慌
 
+```java
+public static void foo() throws Exception {
 
+    AutoCloseable c = null;
+    try {
+        c = dummy();
+        bar();
+    } finally {
+        if (c != null) {
+            c.close();
+        }
+    }
+}
+```
+
+* 如果 bar() 抛出了异常 e1，c.close() 也抛出了异常 e2
+
+```
+public static void foo() {
+    try {
+        throw new RuntimeException("in try");
+    } finally {
+        throw new RuntimeException("in finally");
+    }
+}
+```
+
+* 运行调用 foo() 最终抛出异常: <font color="red">Exception in thread "main" java.lang.RuntimeException: in finally</font>
+* try 中抛出的异常，就被 finally 中抛出的异常淹没掉了
 
 ## 1、suppressed 异常是什么
+
+* 如果 bar() 和 c.close() 同时抛出了异常，那么调用端应该会受到 c.close() 抛出的异常 e2. 那么怎么样抛出 try 中的异常，同时又不丢掉 finally 中的异常？
+
+> Java 7 中 为 `Throwable` 类 增 加 的 `addSuppressed` 方 法。当 一 个异 常 被 抛 出 的 时 候 , 可 能 有 其 他 异 常 因 为 该 异 常 而 被 抑 制 住 , 从 而 无 法 正 常 抛 出 。这时 可 以 通 过`addSuppressed` 方 法 把 这 些 被 抑 制 的 方 法 记 录 下 来 。 被 抑 制 的 异 常 会 出 现在 抛 出 的 异 常 的 堆 栈 信 息 中 , 也 可 以 通 过 `getSuppressed` 方 法 来 获 取 这 些 异 常 。 这 样做 的 好 处 是 不 会 丢 失 任 何 异 常 , 方 便 开 发 人 员 进 行 调 试 。
+
+```java
+public static void foo() throws Exception {
+    AutoCloseable c = null;
+    Exception tmpException = null;
+    try {
+        c = dummy();
+        bar();
+    } catch (Exception e) {
+        tmpException = e;
+        throw e;
+    } finally {
+        if (c != null) {
+            if (tmpException != null) {
+                try {
+                    c.close();
+                } catch (Exception e) {
+                    tmpException.addSuppressed(e);
+                }
+            } else {
+                c.close();
+            }
+        }
+    }
+}
+```
 
 
 
@@ -1697,23 +1880,147 @@ public void foo() {
 
 ## 1、代码块级别的 synchronized
 
+```java
+private Object lock = new Object();
+public void foo() {
+    synchronized (lock) {
+        bar();
+    }
+}
+
+public void bar() { }
+```
+
+* 编译成字节码如下:
+
+```java
+public void foo();
+    Code:
+       0: aload_0
+       1: getfield      #3                  // Field lock:Ljava/lang/Object;
+       4: dup
+       5: astore_1
+       
+       6: monitorenter
+       
+       7: aload_0
+       8: invokevirtual #4                  // Method bar:()V
+       
+      11: aload_1
+      12: monitorexit
+      13: goto          21
+      
+      16: astore_2
+      17: aload_1
+      18: monitorexit
+      19: aload_2
+      20: athrow
+      21: return
+    Exception table:
+       from    to  target type
+           7    13    16   any
+          16    19    16   any
+```
+
+* Java 虚拟机中代码块的同步是通过 monitorenter 和 monitorexit 两个支持 synchronized 关键字语意的。比如上面的字节码
+
+* 0 ~ 5: 将 lock 对象入栈，使用 dup 指令复制栈顶元素，并将它存入局部变量表位置1 的地方，现在站上还剩下一个 lock 对象
+* 6: 以栈顶元素 lock 做为锁，使用 monitorenter 开始同步
+* 7 ~ 8: 调用 bar() 方法
+* 11 ~ 12: 将 lock 对象入栈，调用 monitorexit 释放锁
+* 16 ~ 20: 执行异常处理，字节码会帮忙加上 try-catch 的逻辑。因为编译器必须保证，无论同步代码块中的代码以何种方式结束 (正常 return 或者异常退出)，代码中每次调用 monitorenter 必须执行对对应的 monitorexit 指令。为了保证这一点，编译器会自动生成一个异常处理器，这个异常处理器的目的就是为了同步代码块抛出异常时能执行 monitorexit。这也是字节码中，只有一个 monitorenter 却有两个 monitorexit 的原因
+
+* 可理解为如下代码
+
+```java
+public void _foo() throws Throwable {
+    monitorenter(lock);
+    try {
+        bar();
+    } finally {
+        monitorexit(lock);
+    }
+}
+```
+
+* 根据 try-catch-finally 的字节码实现原理，等价于
+
+```java
+public void _foo() throws Throwable {
+    monitorenter(lock);
+    try {
+        bar();
+        monitorexit(lock);
+    } catch (Throwable e) {
+        monitorexit(lock);
+        throw e;
+    }
+}
+```
+
 ## 2、方法级的 synchronized
 
+* 方法及的同步，是由常量池中方法的 ACC_SYNCHRONIZED 标志来隐式实现的
 
+```java
+synchronized public void testMe() {
+}
+
+对应字节码
+
+public synchronized void testMe();
+descriptor: ()V
+flags: ACC_PUBLIC, ACC_SYNCHRONIZED
+```
+
+* JVM 不会使用特殊的字节码来调用同步方法，当 JVM 解析犯法的符号引用时，它会判断方法是不是同步的 (检查方法 ACC_SYNCHRONIZED 是否被设置)。如果是，执行线程会先尝试获取锁。如果是实例方法，JVM 会先尝试获取实例对象的锁，如果是类方法，JVM 会尝试获取类锁。在同步方法完成以后，不管是正常返回还是异常返回，都会释放锁
 
 # 十七、万恶的擦除
 
 ## 1、当泛型遇到重载
 
+```java
+public void print(List<String> list)  { }
+public void print(List<Integer> list) { }
+```
 
+* 上述代码编译的时候会报错，提示 name clash: print(List\<Integer>) and print(List\<String>) have the same erasure
+* 这两个函数对应的字节码都是
+
+```java
+descriptor: (Ljava/util/List;)V
+Code:
+  stack=0, locals=2, args_size=2
+     0: return
+  LocalVariableTable:
+    Start  Length  Slot  Name   Signature
+        0       1     0  this   LMyClass;
+        0       1     1  list   Ljava/util/List;
+}
+```
 
 ## 2、泛型的核心概念: 类型擦除(type erasure)
 
-
+* Java 的泛型是在 javac 编译期这个级别实现的。在生成的字节码中，已经不包含类型信息。这种在泛型使用时机上类型参数，在编译时被抹掉的过程被称为泛型擦除。
+* 比如在代码中定义: List\<String> 与 List\<Integer> 在编译以后都变成了 List。JVM 看到只是 List，而 JVM 不允许相同签名的函数在一个类中同时存在，所以上面代码中编译无法通过
+* 由泛型附加的类型信息对 JVM 来说是不可见的。Java 编译器会在编译时尽可能的发现可能出错的地方，但也不是万能的。
 
 ## 3、泛型真的被完全擦除了吗
 
+* 在 javac 编译的时候加上 -g 参数生成更多的调试信息，使用 javap -c -v -l 来查看字节码时可以看到更多有用的信息
 
+```java
+  public void print(java.util.List<java.lang.String>);
+    descriptor: (Ljava/util/List;)V
+      stack=0, locals=2, args_size=2
+         0: return
+      LocalVariableTypeTable:
+        Start  Length  Slot  Name   Signature
+            0       1     1  list   Ljava/util/List<Ljava/lang/String;>;
+    Signature: #18                          // (Ljava/util/List<Ljava/lang/String;>;)V
+```
+
+* LocalVariableTypeTable 和 Signature 是针对泛型引入的新的属性，用俩解决泛型的参数类型识别问题， Signature 的作用是存储一个方法在字节码层面的特征签名，这个属性保存的不是原生类型，而是包括了参数化类型的信息。我们依然可以通过反射的方式拿到参数的类型。所谓的擦除，只是把方法 code 属性的字节码进行擦除
 
 # 十八、深入理解反射实现的原理
 
@@ -1733,19 +2040,130 @@ public void foo() {
 
 ### a)、 Java Instrumentation 概述
 
+* 很多工具是基于 Instreumetation 来实现的
+  * APM 产品: pinpoint、skywalking、newrelic、听云的 APM 产品都基于 Instrumentation 实现
+  * 热部署工具: Intelljj 的 HotSwap、Jrebel 等
+  * Java 诊断工具: Arthas、Btrace 等。
+
+* 由于对字节码修改功能的巨大需求，JDK 从 JDK5 版本开始引入了 java.lang.instrument 包。它可以通过 addTransformer 方法设置一个 ClassFileTransformer，可以在这个 ClassFileTransformer 实现类的转换
+* JDK 1.5 支持静态 Instrumentation，基本的思路是在 JVM 启动的时候添加一个代理 (javaagent)，每个代理是一个 jar 包，其 MANIFEST.MF 文件里指定了代理类，这个代理类包含一个 premain 方法。JVM 在类加载会先执行代理类的 premain 方法，再执行 java 程序本身的 main 方法，这就是 premain 名字的来源。在 premain 方法中科院对加载前的 class 文件进行修改。这种机制科院认为是虚拟机级别的 AOP，无需对原有应用做任何修改，就可以实现类的动态修改和增强。
+
 ### b)、Java Instrumenttation 核心方法
+
+* Instrumentation 是 java.lang.instrument 包下的一个接口，这个接口的方法提供了注册类文件转换器、获取所有已加载的类等功能，允许我们在对已加载和未加载的类进行修改，实现  AOP 、性能监控等功能
+* 常用的方法如下: 
+
+```java
+/**
+ * 为 Instrumentation 注册一个类文件转换器，可以修改读取类文件字节码
+ **/
+void addTransofrmer(ClassFileTranformer transformer, boolean canRetransform);
+
+/**
+ * 对 JVM 已经加载的类重新出发类加载
+ **/
+void retranformerClasses(Class<?>... classes) throws UnmodifableClassException;
+
+/**
+ * 获取当前 JVM 加载的所有类对象
+ **/
+Class[] getAllLoadedClasses()
+```
+
+* 它的 addTransformer 给 Instrumentation 注册一个 transformer,  transformer 是 ClassFileTransformer 接口的实例，这个接口就只有一个 transform 方法，调用 addTransformer 设置 transformer 以后，后续 JVM 加载所有类之前都会被这个 transformer 方法拦截，这个方法接收原类文件的字节数组，返回转换过的字节数组，这个方法中可以做任意的类文件改写
+* 下面是一个空的 ClassFileTransformer 的实现:
+
+```java
+public class MyClassTransformer implements ClassFileTransformer {
+  @Override
+  public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined, ProtectionDomain protectionDomain, byte[] classBytes) throws IllegalClassFormatException {
+    // 在这里读取、转换类文件
+    return classBytes;
+  }
+}
+```
 
 ## 2、Javaagent 介绍
 
+* Javaagent 是一个特殊的 jar 包，它不能单独启动的，而必须依附于一个 JVM 进程，可以看做是 JVM 的一个寄生插件，使用 Instrumentation 的 API 用来读取和改写当前 JVM 的类文件。
+
 ### a)、Agent的两种使用方式
+
+*  在 JVM 启动的时候加载，通过 javaagent 启动参数 java -javaagent:myagent.jar MyMain，这种方式在程序 main 方法执行之前 agent 中的 premain 方法
+* 在 JVM 启动后 Attach，通过 Attach API 进行加载，这种方式会在 agent 加载以后执行 agentmain 方法
+* premain 和 agentmain 方法签名如下:
+
+```java
+public static void premain(String agentArgument, Instrumentation instrumentation) throws Exception
+
+public static void agentmain(String agentArgument, Instrumentation instrumentation) throws Exception
+```
+
+* 这两个方法都有两个参数
+  * 第一个 agentArgument 是 agent 的启动参数，可以在 JVM 启动命令行设置，比如 java -javaagent:\<jarfile>=appId:agent-demo,agentType:singleJar test.jar 的情况下，agentArgument 的值为 "appId:agent-demo,agentType:singleJar"
+  * 第二个 instrumentation 是 java.lang.instrument.instrumentation 的实例，可以通过 addTransformer 方法设置一个 ClassFileTransformer
+* 第一种 premain 方法的加载时序如下:
+
+![image-20200829115414878](asserts/image-20200829115414878.png)
 
 ### b)、Agent 包
 
+*  为了能够以 javaagent 的方式运行 premain 和 agentmain 方法，我们需要将其打包成 jar 包，并在其中的 MANIFEST.MF 配置文件中，指定 Premain-class 等信息，一个典型的生成好的 MANIFEST.MF 内容
 
+```java
+Premain-Class: me.geek01.javaagent.AgentMain
+Agent-Class: me.geek01.javaagent.AgentMain
+Can-Redefine-Classes: true
+Can-Retransform-Classes: true
+```
+
+* 下面是一个可以帮助生成上面 MAINIFEST.MF 的 maven 配置
+
+```xml
+<build>
+  <finalName>my-javaagent</finalName>
+  <plugins>
+    <plugin>
+      <groupId>org.apache.maven.plugins</groupId>
+      <artifactId>maven-jar-plugin</artifactId>
+      <configuration>
+        <archive>
+          <manifestEntries>
+            <Agent-Class>me.geek01.javaagent.AgentMain</Agent-Class>
+            <Premain-Class>me.geek01.javaagent.AgentMain</Premain-Class>
+            <Can-Redefine-Classes>true</Can-Redefine-Classes>
+            <Can-Retransform-Classes>true</Can-Retransform-Classes>
+          </manifestEntries>
+        </archive>
+      </configuration>
+    </plugin>
+  </plugins>
+</build>
+```
 
 ## 3、Agent 使用方式之一: JVM 启动参数
 
+* 使用 javaagent 实现简单的函数调用栈跟踪，下面代码为例:
 
+```java
+public class MyTest {
+    public static void main(String[] args) {
+        new MyTest().foo();
+    }
+    public void foo() {
+        bar1();
+        bar2();
+    }
+
+    public void bar1() {
+    }
+
+    public void bar2() {
+    }
+}
+```
+
+* 通过 javaagent 启动参数的方式在每个函数进入和结束都打印一行日志，实现调用过程的追踪的效果。
 
 ## 4、 Agent 使用方式之二: Attach API 使用
 
