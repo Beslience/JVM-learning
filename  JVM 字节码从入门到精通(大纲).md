@@ -2163,44 +2163,512 @@ public class MyTest {
 }
 ```
 
-* 通过 javaagent 启动参数的方式在每个函数进入和结束都打印一行日志，实现调用过程的追踪的效果。
+* 通过 javaagent 启动参数的方式在每个函数进入和结束都打印一行日志，实现调用过程的追踪的效果。[代码见](https://github.com/arthur-zhang/jvm-attach-code/tree/master/my-attach-demo)
+
+* 核心的方法 instrument 的逻辑如下
+
+```java
+public static class MyMethodVisitor extends AdviceAdapter {
+
+    @Override
+    protected void onMethodEnter() {
+        // 在方法开始处插入 <<<enter xxx
+        mv.visitFieldInsn(GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
+        mv.visitLdcInsn("<<<enter " + this.getName());
+        mv.visitMethodInsn(INVOKEVIRTUAL, "java/io/PrintStream", "println", "(Ljava/lang/String;)V", false);
+        super.onMethodEnter();
+    }
+
+    @Override
+    protected void onMethodExit(int opcode) {
+        super.onMethodExit(opcode);
+        // 在方法结束处插入 <<<exit xxx
+        mv.visitFieldInsn(GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
+        mv.visitLdcInsn(">>>exit " + this.getName());
+        mv.visitMethodInsn(INVOKEVIRTUAL, "java/io/PrintStream", "println", "(Ljava/lang/String;)V", false);
+    }
+}
+```
+
+* 把 agent 打包生成 my-trace-agent.jar，添加 agent 启动 MyTest 类
+* 可以看到如下输出:
+
+```
+<<<enter main
+<<<enter foo
+<<<enter bar1
+>>>exit bar1
+<<<enter bar2
+>>>exit bar2
+>>>exit foo
+>>>exit main
+```
+
+* 通过上面的方式，我们在不修改 MyTest 类源码的情况下实现了调用链跟踪的效果。
 
 ## 4、 Agent 使用方式之二: Attach API 使用
 
+* 在 JDK5 中，开发者只能 JVM 启动时指定一个 javaagent 在premain 中操作字节码， Instrumentation 也限于 main 函数执行前，这样的方式存在一定的局限性。从 JDK6 开始引入了动态 Attach Agent 的方案，除了在命令行指定 javaagent，现在可以通过 Attach API 远程加载。常用的 jstack、arthas 等工具都是通过 Attach 机制实现的
+* 这小节会结合跨进程通信中的信号和 Unix 域套接字来看 JVM Attach API 的实现原理
+
 ### a)、JVM Attach API 基本使用
 
-### b)、JVM Attach API 的底层原理
+* 下面以一个实际的例子来演示动态 Attach API 的使用，代码中有一个 main 方法，每个 3s 输出 foo 方法的返回值 100，接下来动态 Attach 上 MyTestMain 进程，修改 foo 的字节码，让 foo 方法返回 50.
+
+```java
+public class MyTestMain {
+    public static void main(String[] args) throws InterruptedException {
+        while (true) {
+            System.out.println(foo());
+            TimeUnit.SECONDS.sleep(3);
+        }
+    }
+
+    public static int foo() {
+        return 100; // 修改后 return 50;
+    }
+}
+```
+
+
+
+### b)、JVM Attach API 的底层原理步骤如下：
+
+* 1、编写 Attach Agent，对 foo 方法做注入，完整的代码见：[github.com/arthur-zhan…](https://github.com/arthur-zhang/jvm-attach-code/tree/master/my-attach-demo)
+
+* 动态 Attach 的 agent 与通过 JVM 启动 javaagent 参数指定的 agent jar 包的方式有所不同，动态 Attach 的 agent 会执行 agentmain 方法，而不是 premain方法。
+
+```java
+public class AgentMain {
+    public static void agentmain(String agentArgs, Instrumentation inst) throws ClassNotFoundException, UnmodifiableClassException {
+        System.out.println("agentmain called");
+        inst.addTransformer(new MyClassFileTransformer(), true);
+        Class classes[] = inst.getAllLoadedClasses();
+        for (int i = 0; i < classes.length; i++) {
+            if (classes[i].getName().equals("MyTestMain")) {
+                System.out.println("Reloading: " + classes[i].getName());
+                inst.retransformClasses(classes[i]);
+                break;
+            }
+        }
+    }
+}
+```
+
+* 2、因为是跨进程通信，Attach 的发起端是一个独立的 java 程序，这个 java 程序会调用 VirtualMachine.attach 方法开始和目标 JVM 进行跨进程通信。
+
+```java
+public class MyAttachMain {
+    public static void main(String[] args) throws Exception {
+        VirtualMachine vm = VirtualMachine.attach(args[0]);
+        try {
+            vm.loadAgent("/path/to/agent.jar");
+        } finally {
+            vm.detach();
+        }
+    }
+}
+```
+
+* 使用 jps 查询到 MyTestMain 的进程 id
+
+```
+java -cp /path/to/your/tools.jar:. MyAttachMain pid
+```
+
+* 可以看到 MyTestMain 的输出的 foo 方法已经返回了 50
+
+```
+java -cp . MyTestMain
+
+100
+100
+100
+agentmain called
+Reloading: MyTestMain
+50
+50
+50
+```
 
 # 二十一、工业级的字节码改写框架 ASM 与 Javassist
 
 ## 1、 ASM 
 
+*  简单的 API 背后 ASM 自动帮我们做了很多事情，比如维护常量池的索引，计算最大栈大小 max_stack，局部变量表大小 max_locals 等。还有如下优点:
+   *  加载设计精巧、使用方便
+   *  更新速度快、支持最新的 Java 版本
+   *  速度非常快，在动态代理 class 的生成和 class 的转换时，尽可能确保运行中的应用不会被 ASM 拖慢
 *  ASM 使用了访问者（Visitor）设计模式，避免了创建和消耗大量的中间变量
-* 
+*   
 
 ## 2、Javassist
 
-
+* 前面的 ASM 入门门槛高，需要跟底层的字节码指令打交道，优点是小巧，性能好。 Javassist 是一个性能比 ASM 稍差但是使用起来简单很多的字节码操作库，不需要了解字节码指令
+* 核心API
+* 
 
 # 二十二、ASM 在 cglib 与 fastjson 上的应用
 
 ## 1、cglib 的简单应用
 
+* 在实现内部，cglib 库使用了 ASM 字节码操作框架来转化字节码，产生新类，帮助开发者屏蔽了很多字节码相关的内部细节，不用再去关心类文件格式、指令集等
+
+![image-20200830093044175](asserts/image-20200830093044175.png)
+
+* 有这样一个 Person 类，想在 doJob 调用前和调用后分别记录一些日志
+
+```java
+public class Person {
+    public void doJob(String jobName) {
+        System.out.println("who is this class: " + getClass());
+        System.out.println("doing job: " + jobName);
+    }
+}
+```
+
+* JDK 动态代理的实现有个明显的缺点：需要目标对象实现一个或多个接口
+* cglib 的实现方案：实现一个 net.sf.cglib.proxy.MethodInterceptor` 接口，用来拦截方法调用。这个接口只有一个方法：`public Object intercept(Object obj, java.lang.reflect.Method method, Object[] args, MethodProxy proxy) throws Throwable;
+* 这个方法的第一个参数 obj 是代理对象，第二个参数 method 是拦截的方法，第三个参数是方法的参数，第四个参数 proxy 用来调和父类的方法。 MethodInterceptor 作为一个桥梁连接了目标对象和代理对象
+
+![image-20200830093552819](asserts/image-20200830093552819.png)
+
+* cglib 代理的核心是 `net.sf.cglib.proxy.Enhancer`类，它用于创建一个 cglib 代理。这个类有一个静态方法`public static Object create(Class type, Callback callback)`，该方法的第一个参数 type 指明要代理的对象类型，第二个参数 callback 是要拦截的具体实现，一般都会传入一个 MethodInterceptor 的实现
+
+```java
+public static void main(String[] _args) {
+    MethodInterceptor interceptor = new MethodInterceptor() {
+        @Override
+        public Object intercept(Object obj, Method method, Object[] args, MethodProxy methodProxy) throws Throwable {
+            System.out.println(">>>>>before intercept");
+            Object o = methodProxy.invokeSuper(obj, args);
+            System.out.println(">>>>>end intercept");
+            return o;
+        }
+    };
+    Person person = (Person) Enhancer.create(Person.class, interceptor);
+    person.doJob("coding");
+}
+```
+
+* 可以用设置系统变量让 cglib 输出生成的文件`System.setProperty(DebuggingClassWriter.DEBUG_LOCATION_PROPERTY, "/path/to/cglib-debug-location");`
+* 核心类是 `Person?EnhancerByCGLIB?a1da8fe5.class`，这个类的反编译以后的代码如下
+
+```java
+public class Person$$EnhancerByCGLIB$$a1da8fe5 extends Person implements Factory {
+    public final void doJob(String jobName) {
+        MethodInterceptor methodInterceptor = this.CGLIB$CALLBACK_0;
+        methodInterceptor.intercept(this, CGLIB$doJob$0$Method, new Object[]{jobName}, CGLIB$doJob$0$Proxy);
+    }
+}
+```
+
+* 可以看到 cglib 生成了一个 Person 的子类，实现了 doJob 方法，此方法会调用 MethodInterceptor 的 intercept 函数，这个函数先输出 ">>>>>before intercept" 然后调用父类（也即真正的 Person 类）的 doJob 的方法，最后输出 ">>>>>end intercept"
+
 ## 2、fastjson
 
 * 通过 ASM 自动生成序列号、反序列化字节码，减少反射开销，理论上可以提高 20% 的性能
 
+```js
+{
+  "id": "A10001",
+  "name": "Arthur.Zhang",
+  "score": 100
+}
+
+对应 Java bean
+
+public static class MyBean {
+    public String id;
+    public String name;
+    public Integer score;
+}
+```
+
+* 假定不考虑嵌套、特殊字符的情况，不做语法解析的情况下
+
+```java
+public static void main(String[] args) {
+    String json = "{ \"id\": \"A10001\", \"name\": \"Arthur.Zhang\", \"score\": 100 }";
+    // 去掉头尾的 {}
+    String str = json.substring(1, json.length() - 1);
+    // 用 "," 分割字符串
+    String[] fieldStrArray = str.split(",");
+    MyBean bean = new MyBean();
+    for (String item : fieldStrArray) {
+        // 分隔 key value
+        String[] parts = item.split(":");
+        String key = parts[0].replaceAll("\"", "").trim();
+        String value = parts[1].replaceAll("\"", "").trim();
+        // 通过反射获取字段对应的 field
+        Field field = MyBean.class.getDeclaredField(key);
+        // 根据字段类型通过反射设置字段的值
+        if (field.getType() == String.class) {
+            field.set(bean, value);
+        } else if (field.getType() == Integer.class) {
+            field.set(bean, Integer.valueOf(value));
+        }
+    }
+    System.out.println(bean);
+}
+```
+
+* 可以看到获取字段 field、设置字段值都需要通过反射的方式。那么 fastjson 是怎么解决反射低效的问题的呢？通过调用的方式，把 fastjson 生成的字节码写入到文件中。针对 MyBean，fastjson 是 ASM 为它生成了一个反序列化的类，里面硬编码了处理序列化需要用到的所有可能场景，不再需要任何反射相关的代码。结合创新的 sort field fast match 算法，速度更上一层楼。下面是通过阅读字节码精简以后的 Java 代码
+
+```java
+public class FastjsonASMDeserializer_1_MyBean extends JavaBeanDeserializer {
+    public char[] id_asm_prefix__ = "\"id\":".toCharArray();
+    public char[] name_asm_prefix__ = "\"name\":".toCharArray();
+    public char[] score_asm_prefix__ = "\"score\":".toCharArray();
+
+    @Override
+    public Object deserialze(DefaultJSONParser parser, Type type, Object fieldName, int features) {
+        JSONLexerBase lexer = (JSONLexerBase) parser.lexer;
+        MyTest.MyBean localMyBean = new MyTest.MyBean();
+        String id = lexer.scanFieldString(this.id_asm_prefix__);
+        if (lexer.matchStat > 0) {
+            localMyBean.id = id;
+        }
+        String name = lexer.scanFieldString(this.name_asm_prefix__);
+        if (lexer.matchStat > 0) {
+            localMyBean.name = name;
+        }
+        Integer score = lexer.scanFieldInt(this.score_asm_prefix__);
+        if (lexer.matchStat > 0) {
+            localMyBean.score = score;
+        }
+        return localMyBean;
+    }
+}
+```
+
  # 二十三、破解软件-直接修改字节码
+
+* 折腾过的软件
+  * 分析 GC 日志的桌面端软件  [censum](https://www.jclarity.com/censum/)
+  * 分析 GC 日志和线程的 gceasy 和 fastthread
+  * Intelljj 上 Mybatis 插件（低版本），高版本使用了代码混淆，导致阅读比较困难，没有去折腾
+  * ELK 铂金版
 
 ## 1、常用工具
 
+* 字节码反编译查看工具 jdgui，luyten
+* 字节码浏览工具 jclasslib
+* ASM
+* vim、hex editor
+
 ##  2、破解方式
+
+* 解包、直接修改 class 文件 这种适用于非常简单，改动一些常量就可以完成的情况
+* 解包、通过 asm 工具修改 class 文件 适用于逻辑较为复杂的情况
+* 通过 -javaagent 启动参数，动态修改，前面两种都属于破坏了原始的 class 文件，不属于无痛破解，如果要破解的软件设计了，需要重新修改打包，非常麻烦。采用 Java agent 的方式，只用在命令行启动参数里面加入一行参数就可以了。后续软件升级了，都不用修改 agent 的源码，非常方便
+
+### 3、第一个破解项目
+
+接下来讲解的待破解的软件是我自己用 swing 写的一个小 demo，这个 jar 包可以在 github 网站 [github.com/arthur-zhan…](https://github.com/arthur-zhang/jvm-bytecode-book-example/tree/master/crack-demo-jar) 下载。
+
+使用 java -jar 运行这个待破解的 crack-demo.jar 文件，会弹出证书已过期的提示框，如下图 x-x 所示。
+
+
+
+![License 过期提示框](https://user-gold-cdn.xitu.io/2020/1/10/16f8d56a38dc2a79?imageView2/0/w/1280/h/960/format/webp/ignore-error/1)
+
+
+
+使用 JD-GUI 打开这个 jar 包，查看反编译的代码，核心的校验逻辑在 StartupChecks 类中，如下所示。
+
+```
+public class StartupChecks {
+  private static int getDayOfMonth() {
+    return 7;
+  }
+  
+  private static int getMonthOfYear() {
+    return 0;
+  }
+  
+  private static int getYear() {
+    return 2019;
+  }
+  
+  public static boolean canLoad() {
+    validateLicensing();
+    GregorianCalendar currentDate = new GregorianCalendar();
+    GregorianCalendar expiryDate = getExiryDate();
+    if (currentDate.after(expiryDate)) {
+      return false;
+    }
+    return true;
+  }
+  
+  private static void validateLicensing() {}
+  
+  public static GregorianCalendar getExiryDate() {
+    return new GregorianCalendar(getYear(), getMonthOfYear(), getDayOfMonth());
+  }
+}
+```
+
+可以看到，这里判断 license 是否过期的方法比较简单，是拿当前时间与过期时间做对比，如果当前时间大于过期时间，就返回 license 已过期。破解这个软件最简单的思路是把过期的年份 `2019` 修改为 `2029` 或更久远的年份。
+
+jar 包本质上就是一个 zip 压缩包，用 unzip 命令将 jar 包解压到一个临时文件夹 tmp 中，对应的目录结构如下所示。
+
+```
+.
+├── META-INF
+│   ├── MANIFEST.MF
+│   └── maven
+│       └── LicenseCheckSwing
+│           └── LicenseCheckSwing
+│               ├── pom.properties
+│               └── pom.xml
+└── me
+    └── ya
+        └── swing
+            ├── AppMain.class
+            └── StartupChecks.class
+```
+
+使用 16 进制文件编辑器打开 StartupChecks.class 文件，搜索 `2019` 对应的十六进制表示(07E3)，如下图 x-x 所示。
+
+
+
+![使用 16 进制编辑器修改 StartupChecks 类](https://user-gold-cdn.xitu.io/2020/1/30/16ff4ef9b178fe22?imageView2/0/w/1280/h/960/format/webp/ignore-error/1)
+
+
+
+将 07E3 修改为 2029(07ED)，然后保存文件。接下来使用 `zip` 命令将文件重新打包，如下所示。
+
+```
+zip -r ./crack-demo-v1.jar . *
+```
+
+使用 java 命令重新执行这个 jar 包，如下所示。
+
+```
+java -jar crack-demo-v1.jar
+```
+
+这时出现了 license 合法的提示框，如下图 x-x 所示。
+
+
+
+![软件破解成功页面](https://user-gold-cdn.xitu.io/2020/1/30/16ff4ef9b037959f?imageView2/0/w/1280/h/960/format/webp/ignore-error/1)
+
+
+
+这种手动修改 class 文件的方式比较麻烦，也只适用于比较简单的场景。接下来会介绍如何无痛破解，不需要手动修改 class 文件重新打包。
+
+可以看到，这种方式比较麻烦，我们会讲如何不修改源 class 文件的方法来无痛破解 Java 系软件，不过这之前，我们需要学习 ASM 和 javaagent 的原理
 
 # 二十四、无痛破解 Java系软件
 
 ## 1、换个花样破解
 
-核心思路是通过 javaagent 和 ASM 来进行字节码改写，在类加载之前修改字节码逻辑
+* 核心思路是通过 javaagent 和 ASM 来进行字节码改写，在类加载之前修改字节码逻辑。
+* 继续以 crack-demo.jar 文件为例进行讲解
+* 根据前面反编译的结果，licenses 是否合法取决于 canLoad 方法的返回值，返回 true 表示 license 合法，返回 false 表示 license 非法。那么只要在 canLoad 方法开始处插入 "return true;" 语句，让 canLoad 返回 true 即可，注入后的代码如下所示
+
+```java
+public static boolean canLoad() {
+    // 在这里强行插入 return true;
+    return true;
+    // 下面的语句不会执行到
+    validateLicensing();
+    GregorianCalendar currentDate = new GregorianCalendar();
+    GregorianCalendar expiryDate = getExiryDate();
+    if (currentDate.after(expiryDate)) {
+        return false;
+    }
+    return true;
+}
+```
+
+* "return true;" 对应的字节码语句如下
+
+```
+ICONST_1
+IRETURN
+```
+
+下面来看具体的代码，首先实现一个自定义的 MethodVisitor，在方法开始处插入 "return true;" 逻辑，代码如下所示。
+
+```
+public static class MyMethodVisitor extends AdviceAdapter {
+    @Override
+    protected void onMethodEnter() {
+        // 强行插入 return true;
+        mv.visitInsn(ICONST_1);
+        mv.visitInsn(IRETURN);
+    }
+}
+```
+
+接下来实现一个自定义的 ClassVisitor，只处理 canLoad 方法，代码如下所示。
+
+```
+public static class MyClassVisitor extends ClassVisitor {
+    @Override
+    public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions) {
+        MethodVisitor mv = super.visitMethod(access, name, desc, signature, exceptions);
+        // 只注入 canLoad 方法
+        if (name.equals("canLoad")) {
+            return new MyMethodVisitor(mv, access, name, desc);
+        }
+        return mv;
+    }
+}
+```
+
+随后实现一个自定义的 ClassFileTransformer，在 transform 方法中进行字节码改写，代码如下所示。
+
+```
+public static class MyClassFileTransformer implements ClassFileTransformer {
+    @Override
+    public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined, ProtectionDomain protectionDomain, byte[] classBytes) throws IllegalClassFormatException {
+        // 只注入 StartupChecks 类
+        if (className.equals("me/ya/swing/StartupChecks")) {
+            ClassReader cr = new ClassReader(classBytes);
+            ClassWriter cw = new ClassWriter(cr, ClassWriter.COMPUTE_FRAMES);
+            ClassVisitor cv = new MyClassVisitor(cw);
+            cr.accept(cv, ClassReader.SKIP_FRAMES | ClassReader.SKIP_DEBUG);
+            return cw.toByteArray();
+        }
+        return classBytes;
+    }
+}
+```
+
+执行 `mvn clean package` 编译生成 `my-crack-agent.jar`，执行 `java -javaagent:/path/to/my-crack-agent.jar -jar crack-demo.jar`，发现已经成功地绕过了过期检查，弹出了 license 合法的提示框。
+
+接下来我们来对比一下 `canLoad` 方法 ASM 改写前后的字节码，改写前的字节码如下所示。
+
+```
+public static boolean canLoad();
+Code:
+  stack=2, locals=2, args_size=0
+     0: invokestatic  #2                  // Method validateLicensing:()V
+     3: new           #3                  // class java/util/GregorianCalendar
+     6: dup
+     7: invokespecial #4                  // Method java/util/GregorianCalendar."<init>":()V
+    ...
+```
+
+改写后的字节码如下所示。
+
+```
+public static boolean canLoad();
+Code:
+  stack=1, locals=2, args_size=0
+     0: iconst_1
+     1: ireturn
+     2: nop
+     3: nop
+     4: nop
+     ...
+```
+
+可以看到经过改写以后 `canLoad` 在字节码开始处插入了 `"return true;"`，旧指令被替换为了无用的 nop 指令。
 
 ## 2、破解gceasy
 
@@ -2210,41 +2678,406 @@ public class MyTest {
 
 ## 1、什么是APM
 
+* APM 是 Application Performance Managment 的缩写，字面意思很容易理解，"应用性能管理"
+
 ## 2、分布式跟踪理论基础
 
-每个请求都生成全局唯一的 Trace ID／Span ID，端到端透传到上下游所有的节点，通过 Trace ID 将不同系统的孤立的调用日志和异常日志串联在一起，同时通过 Span ID、ParentId 表达节点的父子关系
+* 每个请求都生成全局唯一的 Trace ID／Span ID，端到端透传到上下游所有的节点，通过 Trace ID 将不同系统的孤立的调用日志和异常日志串联在一起，同时通过 Span ID、ParentId 表达节点的父子关系
+
+![image-20200830104542230](asserts/image-20200830104542230.png)
 
 ## 3、单JVM调用链路跟踪实现原理
 
-spanId 做为当前调用id，parentId 做为父调用 id，traceId 做为整条链路 id
+* 在 Java 中，我们可以很方便的用 ThreadLocal 的 Stack 的实现调用栈的跟踪，比如有如下的调用关系
+
+```
+void A() {
+    B();
+}
+void B() {
+    C();
+}
+void C(){
+}
+```
+
+* 我们约定：spanId 做为当前调用id，parentId 做为父调用 id，traceId 做为整条链路 id
+
+![image-20200830104633655](asserts/image-20200830104633655.png)
+
+* 那么我们调用上报的 trace 信息大概如下
+
+```
+[
+  {
+    "spanName": "A()",
+    "traceId": "1001",
+    "spanId": "A001",
+    "parentId": null,
+    "timeCost": 1000,
+    "startTime": 10001,
+    "endTime": 11001,
+    "uncaughtException": null
+  },
+  {
+    "spanName": "B()",
+    "traceId": "1001",
+    "spanId": "B001",
+    "parentId": "A001",
+    "timeCost": 900,
+    "startTime": 10001,
+    "endTime": 11001,
+    "uncaughtException": null
+  },
+  {
+    "spanName": "C()",
+    "traceId": "1001",
+    "spanId": "C001",
+    "parentId": "B001",
+    "timeCost": 800,
+    "startTime": 10001,
+    "endTime": 11001,
+    "uncaughtException": "java.lang.RuntimeException"
+  }
+]
+```
+
+* 通过 traceId、spanId、parentId 三者的数据，我们可以很方便的构建出一个完整的调用栈
+
+![image-20200830104730769](asserts/image-20200830104730769.png)
 
 ## 4、扩进程、异构系统的调用链路跟踪如何处理
+
+* 只需要把 traceId 和 spanId 传递到下一层调用就好了。比如我们采用 HTTP 调用的方式调用另外一个 JVM 的服务。 在 JVM 1 中在 HTTP 调用前调用相应 setHeader 函数新增 X-APM-TraceId 和 X-APM-SpanId 两个 header。 JVM 2 收到请求以后，会先去检查是否有这两个 header，如果没有这两个 header，说明它自己是最顶层的调用。如果有这两个 header的情况下，会把 header 中的 traceId 当做后续调用的 traceId，header 中的 spanId 做为当前调用的 parentId。如下图所示
+
+![image-20200830104809867](asserts/image-20200830104809867.png)
 
 # 二十六、一个可落地的APM整体架构
 
 ## 1、架构概览
 
+* 以数据流向的角度看整个后端 APM 的架构如下
+
+![image-20200830104843430](asserts/image-20200830104843430.png)
+
 ## 2、Agent上报
+
+* Agent 上报端采用一个大小为 N 的内存队列缓存产生的调用 trace，N 一般为几千，业务代码写完队列立即 return，如果此时因为队列消费太慢，则允许丢数据，以免造成内存暴涨影响正常业务。设置一个心跳包定时上报当前队列的大小，如果超过 N 的 80%，则进行告警人工干预。
+
+![image-20200830104940415](asserts/image-20200830104940415.png)
+
+* 因为 APM 会产生调用次数放大，一次调用可能产生几十次上百次的的链路调用 trace。因此数据一定要合并上报，减少网络的开销。 这个场景就是 **合并上报，指定时间还没达到批量的阈值，有多少条报多少条**，针对此场景有一个非常简单的工具类，用 BlockingQueue 实现了带超时的批量取
+* Add 方法
+
+```
+ // 如果队列已满，需要超时等待一段时间，使用此方法
+queue.offer(logItem, 10, TimeUnit.MILLISECONDS)
+// 如果队列已满，直接需要返回add失败，使用此方法
+queue.offer(logItm) 
+```
+
+* 批量获取方法 BlockingQueue的批量取方法drainTo()不支持超时特性，但是注意到poll() 支持，结合这两者的特性我们做了如下的改动（参考部分 Guava 库的源码）
+
+  ```
+  public static <E> int batchGet(BlockingQueue<E> q,Collection<? super E> buffer, int numElements, long timeout, TimeUnit unit) throws InterruptedException {
+      long deadline = System.nanoTime() + unit.toNanos(timeout);
+      int added = 0;
+      while (added < numElements) {
+  	    // drainTo非常高效，我们先尝试批量取，能取多少是多少，不够的poll来凑
+          added += q.drainTo(buffer, numElements - added);
+          if (added < numElements) {
+              E e = q.poll(deadline - System.nanoTime(), TimeUnit.NANOSECONDS);
+              if (e == null) {
+                  break;
+              }
+              buffer.add(e);
+              added++;
+          }
+      }
+      return added;
+  }
+  ```
+
+  完整代码如下
+
+  ```
+  private static final int SIZE = 5000;
+  private static final int BATCH_FETCH_ITEM_COUNT = 50;
+  private static final int MAX_WAIT_TIMEOUT = 30;
+  private BlockingQueue<String> queue = new LinkedBlockingQueue<>(SIZE);
+      
+  public boolean add(final String logItem) {
+      return queue.offer(logItem);
+  }
+  public List<String> batchGet() {
+      List<String> bulkData = new ArrayList<>();
+      batchGet(queue, bulkData, BATCH_FETCH_ITEM_COUNT, MAX_WAIT_TIMEOUT, TimeUnit.SECONDS);
+      return bulkData;
+  }
+  public static <E> int batchGet(BlockingQueue<E> q,Collection<? super E> buffer, int numElements, long timeout, TimeUnit unit) throws InterruptedException {
+      long deadline = System.nanoTime() + unit.toNanos(timeout);
+      int added = 0;
+      while (added < numElements) {
+          added += q.drainTo(buffer, numElements - added);
+          if (added < numElements) {
+              E e = q.poll(deadline - System.nanoTime(), TimeUnit.NANOSECONDS);
+              if (e == null) {
+                  break;
+              }
+              buffer.add(e);
+              added++;
+          }
+      }
+      return added;
+  }
+  ```
 
 ## 3、数据收集服务
 
+* 数据收集端的职责是对上报上来的数据进行清洗、转换、流转给下一级消息队列进行派发，相当于大数据 ETL（Extract-Transform-Load）流程。数据收集服务要求非常高的性能，如果收集服务慢，上报端队列处理不及时，就会丢数据了。因此这部分的逻辑要尽可能的简单和可靠。
+
+![-w1051](https://user-gold-cdn.xitu.io/2019/1/10/16835725e8a8dd15?imageView2/0/w/1280/h/960/format/webp/ignore-error/1)
+
+* 现在这部分的接口响应时间的 99 百分位都是在 1ms 以内处理完
+
 ## 4、数据处理端
 
-数据处理可以分为三大部分：流水查询、实时告警、离线报表分析
+* 数据处理可以分为三大部分：流水查询、实时告警、离线报表分析
 
+- 流水查询 因为我们经常根据一些用户 id 或者特定的字符串来检索整条链路调用，我们在技术选型上选择了 ElasticSearch 来做存储和模糊查询
 
+  ![img](https://user-gold-cdn.xitu.io/2019/1/10/16835725e8b64964?imageView2/0/w/1280/h/960/format/webp/ignore-error/1)
+
+* ElasticSearch 在海量数据存储和文本检索方面的巨大优势和，结合 ELK 工具套件，可以非常轻松的实现数据可视化、运维、监控、告警。比如我们查询特定调用的昨天一整天响应时间百分位，可以非常方便的统计出来
+
+![-w1390](https://user-gold-cdn.xitu.io/2019/1/10/16835725e8c1255d?imageView2/0/w/1280/h/960/format/webp/ignore-error/1)
+
+* 也可以方便统计某个项目整体的响应时间百分位，可以用来衡量服务 SLA 水平
+
+![img](https://user-gold-cdn.xitu.io/2019/1/10/16835725e8c02530?imageView2/0/w/1280/h/960/format/webp/ignore-error/1)
+
+- 实时告警 实时数据处理可以用时序数据库，也可以用 Redis + Lua 的方式，有告警的情况下可以达到分钟级别的微信、邮件通知，也可以在业务上做告警收敛，避免告警风暴
+- 离线处理 离线处理主要产生一些实时性要求没那么高、ELK 无法生成的复杂报表，技术栈上有很多可供选择的，我们这里选择的是最传统的阿里云 ODPS。
 
 # 二十七、APM字节码注入的代码实现
 
 ## 1、使用更强大AdviceAdapter来生成try-catch-finally 语句块
 
-### a)、onMethodEnter
+函数注入其实就是对其内容用 try-catch-finally 包裹起来。 考虑一个实际的场景，我们经常会在代码内部捕获很多异常，甚至是全局捕获异常，这样的情况下很多异常被淹没了，因此有必要对代码内部捕获的异常也做记录和上报，在上报端进行判断是否需要处理。
 
-### b)、onMethodExit
+字节码要注入的效果如下
 
-### c)、visitMaxs
+```
+源代码
+public void saveFile() {
+    try {
+        fileSaveService.save();
+    } catch (FileSaveException e) {
+        e.printStackTrace();
+    }
+    doOtherBusiness();
+}
 
-### d)、visitTryCatchBlock 与 visitLabel
+字节码改写以后
+
+public void saveFile() {
+    List<Throwable> caughtThrowableList = new ArrayList<>();
+    try {
+        Tracer.getInstance().startSubSpan("saveFile()", "geek01-demo", Span.SpanType.LOCAL_ONLY);
+        try {
+            fileSaveService.save();
+        } catch (FileSaveException e) {
+            caughtThrowableList.add(e);
+            e.printStackTrace();
+        }
+        doOtherBusiness();
+    } catch (Throwable e) {
+        Tracer.getInstance().completeSubSpan(e, caughtThrowableList);
+        throw e;
+    }
+    Tracer.getInstance().completeSubSpan(null, caughtThrowableList);
+}
+```
+
+这里采用继承 ASM-commons 包中的 AdviceAdapter 类。这个方法适配器是一个抽象类，可以用于在方法的开始和 RETURN、ATHROW 指令前插入代码，它的 onMethodEnter、onMethodExit、visitMaxs 函数是比较简单的切入点。
+
+```
+public class TraceClassTransform extends AdviceAdapter {
+    @Override
+    protected void onMethodEnter() {
+
+    }
+    @Override
+    protected void onMethodExit(int opcode) {
+    
+    }
+    @Override
+    public void visitMaxs(int maxStack, int maxLocals) {
+        
+    }
+}
+```
+
+### onMethodEnter
+
+这个方法在函数调用进入时执行，可以做初始化的操作。
+
+- 在函数开始时进行变量的初始化，首先新建 caughtThrowableList 变量。对应的字节码是变量初始化三部曲 `new-dup-invokespecial<init>`
+- 增加一个 try 语句开始的 label，为后面完整的构造 try-catch 块做准备，具体的指令是`visitLabel(methodStartLabel)`
+- 接下来调用`Tracer.getInstance().startSubSpan()`函数在 ThreadLocal 的栈中入栈当前 span 调用，这部分完整的代码可以看文末 github 仓库完整代码
+
+```
+@Override
+protected void onMethodEnter() {
+    visitTypeInsn(NEW, "java/util/ArrayList");
+    dup();
+    visitMethodInsn(INVOKESPECIAL, "java/util/ArrayList", "<init>", "()V", false);
+    storeLocal(caughtExceptionListLocal, Type.getObjectType("java/util/ArrayList"));
+
+    visitLabel(methodStartLabel);
+    push(appId);
+    push(className);
+    push(methodName);
+    invokeStatic(Type.getType(this.getClass()),
+            new Method("startSubSpan",
+                    "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V"
+            ));
+}
+```
+
+### onMethodExit
+
+我们在这里处理正常退出的情况，异常退出的情况，我们统一在 visitMaxs 中处理。
+
+```
+ @Override
+protected void onMethodExit(int opcode) {
+    if (opcode != ATHROW) {
+        exitMethod(false);
+    }
+}
+    
+private void exitMethod(boolean throwing) {
+    if (throwing) {
+        dup();
+    } else {
+        push((Type) null);
+    }
+    loadLocal(caughtExceptionListLocal);
+
+    invokeStatic(Type.getType(this.getClass()),
+            new Method("completeSubSpan",
+                    "(Ljava/lang/Object;Ljava/lang/Object;)V"
+            ));
+    if (throwing) {
+        visitInsn(ATHROW);
+    }
+}
+```
+
+正常退出的情况下，需要执行 `Tracer.getInstance().completeSubSpan(null, caughtThrowableList);`只用在字节码中把 completeSubSpan 所需的参数入栈，调用 invokeStatic 指令就可以了。第一个参数未捕获异常为 null，第二个参数捕获异常列表为 caughtExceptionListLocal
+
+### visitMaxs
+
+在这里真正处理异常退出的情况，`Tracer.getInstance().completeSubSpan(uncaughtException, caughtThrowableList);` 。使用 dup 指令复制栈顶现在的元素（未捕获异常），如果不这样的话，使用 invokeStatic 指令调用 completeSubSpan 以后，未捕获异常就再也找不到了，没有办法调用 athrow 把异常抛出去
+
+```
+@Override
+public void visitMaxs(int maxStack, int maxLocals) {    
+    exitMethod(true);
+    super.visitMaxs(maxStack, maxLocals);
+}
+```
+
+### visitTryCatchBlock 与 visitLabel
+
+到目前为止还没有处理代码块内部捕获异常的逻辑。这里只需要简单的把内部捕获的异常添加到 caughtExceptionList 中即可，为了能进入 catch 代码块内部，需要覆写 visitLabel 方法。同时因为本身代码块会包裹 try-catch-finally 语句块，需要过滤掉刚才自己添加的这部分指令。采用的方式是用一个 HashMap 代码块内部的 catch 块
+
+```
+@Override
+public void visitLabel(Label label) {
+    super.visitLabel(label);
+    if (label != null && matchedHandle.get(label) != null && !label.equals(endFinallyLabel)) {
+
+        dup(); // exception
+
+        loadLocal(caughtExceptionListLocal, Type.getObjectType("java/util/ArrayList"));
+        swap(); // swap exception <-> list
+        invokeVirtual(Type.getType(ArrayList.class), new Method("add", "(Ljava/lang/Object;)Z"));
+        pop();
+    }
+}
+
+@Override
+public void visitTryCatchBlock(Label start, Label end, Label handler, String exception) {
+    super.visitTryCatchBlock(start, end, handler, exception);
+    if (exception != null) {
+        List<String> handles = matchedHandle.get(handler);
+        if (handles == null) handles = new ArrayList<>();
+        handles.add(exception);
+        matchedHandle.put(handler, handles);
+    }
+}
+```
+
+之前写这段代码的时候调试了很久没有成功，后来定位到是`invokeVirtual(Type.getType(ArrayList.class), new Method("add", "(Ljava/lang/Object;)Z"));` 语句后面少了一个 pop 指令，为什么需要 pop 指令呢？ArrayList add 函数的函数声明为 `public boolean add(E e) { }`，它有一个 boolean 类型的返回值，但是正常的使用中几乎从来没有人知道或者使用过这个返回值，导致调用完栈帧没有清空，造成了后续一连串指令的错乱。
+
+## 0x02 获取特定的上下文信息
+
+在注入 Tomcat、JDBC、Jedis等函数库时，经常需要动态的取一些重要的上线文信息，比如请求的 url、HTTP 方法、JDBC 执行的 SQL、Redis 执行的指令等。 以 Jedis 的 set 函数注入为例
+
+```
+public String set(final String key, String value) {
+    checkIsInMultiOrPipeline();
+    client.set(key, value);
+    return client.getStatusCodeReply();
+}
+```
+
+set 函数的函数参数就是属于当前 span 非常重要的信息，否则只是上报一个简单的 Jedis.set() 调用，如果这个调用耗时很久，在排查问题时还是不知道具体是执行什么 Redis 的命令耗时较长。因此需要对具体的类做具体的处理，常见需要处理的库有： Jedis、各种连接池、Tomcat servlet、Dubbo provider、Mongo、JDBC
+
+## 0x03 跨进程链路调用的实现
+
+前面已经介绍过跨进程调用是采用在调用方注入当前 traceId 和 spanId 来实现的。以调用 Dubbo 为例，Dubbo 真正的远程调用是在 `com.alibaba.dubbo.rpc.cluster.support.AbstractClusterInvoker.invoke()`函数
+
+```
+public Result invoke(Invocation invocation) throws RpcException {
+    return new RpcResult(doInvoke(proxy, invocation.getMethodName(), invocation.getParameterTypes(), invocation.getArguments()));
+}
+```
+
+需要把上述代码改写为
+
+```
+public Result invoke(Invocation invocation) throws RpcException {
+    invocation.setAttachment("X-APM-TraceId", "traceId-1001");
+    invocation.setAttachment("X-APM-SpanId", "spanId-A001");
+    return new RpcResult(doInvoke(proxy, invocation.getMethodName(), invocation.getParameterTypes(), invocation.getArguments()));
+}
+```
+
+
+
+![img](https://user-gold-cdn.xitu.io/2019/1/11/1683a91b8c825325?imageView2/0/w/1280/h/960/format/webp/ignore-error/1)
+
+
+
+实现示例代码如下
+
+```
+public static void addHeader(Span span, Object o) {
+    try {
+        if (span.getTraceId() != null) {
+            MethodUtils.invokeExactMethod(o, "setAttachment", TraceHeaders.TRACE_ID, span.getTraceId());
+        }
+        if (span.getSpanId() != null) {
+            MethodUtils.invokeExactMethod(o, "setAttachment", TraceHeaders.SPAN_ID, span.getSpanId());
+        }
+    } catch (Exception e) {
+        e.printStackTrace();
+    }
+}
+```
 
 
 
