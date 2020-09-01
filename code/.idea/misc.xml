@@ -4,6 +4,7 @@
     <option name="originalFiles">
       <list>
         <option value="$PROJECT_DIR$/my-trace-agent/pom.xml" />
+        <option value="$PROJECT_DIR$/my-attach/pom.xml" />
       </list>
     </option>
   </component>

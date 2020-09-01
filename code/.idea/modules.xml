@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/code.iml" filepath="$PROJECT_DIR$/code.iml" />
+      <module fileurl="file://$PROJECT_DIR$/my-attach/my-attach.iml" filepath="$PROJECT_DIR$/my-attach/my-attach.iml" />
       <module fileurl="file://$PROJECT_DIR$/my-trace-agent/my-trace-agent.iml" filepath="$PROJECT_DIR$/my-trace-agent/my-trace-agent.iml" />
     </modules>
   </component>
