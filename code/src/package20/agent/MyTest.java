@@ -1,10 +1,11 @@
-package package20;
+package package20.agent;
 
 public class MyTest {
 
     public static void main(String[] args) {
         new MyTest().foo();
     }
+
     public void foo() {
         bar1();
         bar2();

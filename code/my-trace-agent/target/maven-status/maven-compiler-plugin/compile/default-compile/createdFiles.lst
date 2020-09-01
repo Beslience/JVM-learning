@@ -1,4 +1,4 @@
 Agent.class
-Agent$MyClassVisitor.class
 Agent$MyMethodVisitor.class
+Agent$MyClassVisitor.class
 Agent$MyClassFileTransformer.class

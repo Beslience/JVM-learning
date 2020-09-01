@@ -55,7 +55,9 @@ public class Agent {
         @Override
         public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined,
                                 ProtectionDomain protectionDomain, byte[] bytes) throws IllegalClassFormatException {
-            if (!"package20.MyTest".equals(className)) return bytes;
+            if (!"package20/agent/MyTest".equals(className)) {
+                return bytes;
+            }
             ClassReader cr = new ClassReader(bytes);
             ClassWriter cw = new ClassWriter(cr, ClassWriter.COMPUTE_FRAMES);
             ClassVisitor cv = new MyClassVisitor(cw);
